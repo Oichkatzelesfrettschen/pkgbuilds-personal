@@ -1,0 +1,10 @@
+/build/
+/dist/
+/pkg/
+/src/
+/*.pkg.tar.*
+/source_analysis_mcp.egg-info/
+/.pytest_cache/
+/.ruff_cache/
+__pycache__/
+*.pyc

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "source-analysis-mcp"
+version = "0.2.0"
+description = "Unified local MCP server for source, static-analysis, binary, tracing, and fuzzing tools"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+  { name = "Oaich" }
+]
+dependencies = [
+  "mcp>=2.3.0,<3",
+  "pydantic>=2.0.0",
+  "tomlkit>=0.13.0"
+]
+
+[project.scripts]
+source-analysis-mcp = "source_analysis_mcp.cli:main"
+source-analysis-mcp-register = "source_analysis_mcp.register:main"
+
+[tool.setuptools]
+packages = ["source_analysis_mcp"]
+include-package-data = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]

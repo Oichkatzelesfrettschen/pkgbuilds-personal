@@ -1,0 +1,29 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+pkgname=plugdev-group
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Creates plugdev system group for hardware device access"
+arch=('any')
+url="https://wiki.archlinux.org/title/Users_and_groups"
+license=('MIT')
+depends=('systemd')
+source=('plugdev.conf')
+sha256sums=('SKIP')
+
+package() {
+    # Install sysusers.d configuration for plugdev group
+    install -Dm644 "$srcdir/plugdev.conf" "$pkgdir/usr/lib/sysusers.d/plugdev.conf"
+}
+
+post_install() {
+    # Create the plugdev system group
+    systemd-sysusers /usr/lib/sysusers.d/plugdev.conf
+    echo "==> plugdev system group created"
+    echo "==> Add your user to the group with:"
+    echo "    sudo usermod -aG plugdev \$USER"
+    echo "==> Log out and log back in for group membership to take effect"
+}
+
+post_upgrade() {
+    post_install
+}

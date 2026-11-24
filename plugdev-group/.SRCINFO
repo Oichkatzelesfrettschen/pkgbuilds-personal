@@ -1,0 +1,12 @@
+pkgbase = plugdev-group
+	pkgdesc = Creates plugdev system group for hardware device access
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://wiki.archlinux.org/title/Users_and_groups
+	arch = any
+	license = MIT
+	depends = systemd
+	source = plugdev.conf
+	sha256sums = SKIP
+
+pkgname = plugdev-group
