@@ -38,7 +38,7 @@ Optional CUDA environment for NVIDIA RTX 4070 (Compute Capability 8.9)
 ### 1. Install the package
 
 ```bash
-cd ~/Github/PKGBUILDS/pkgbuilds-in-progress/eirikr-bash-config
+cd eirikr-bash-config
 makepkg -si
 ```
 
