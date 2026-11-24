@@ -1,0 +1,22 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+
+# The distccd ordering drop-in for this workstation's build mesh, which was
+# hand-written into /etc/systemd/system and owned by no package. distcc owns
+# the unit; this owns the local ordering placed on it.
+
+pkgname=eirikr-distcc-mesh
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Order distccd after the network and the zeroconf daemon on this workstation"
+arch=('any')
+url="https://github.com/Oichkatzelesfrettschen/PKGBUILDS"
+license=('GPL-3.0-or-later')
+depends=('distcc' 'systemd')
+optdepends=('avahi: advertises distccd when it runs with --zeroconf')
+source=('lan-zeroconf.conf')
+sha256sums=('SKIP')
+
+package() {
+    install -Dm644 "$srcdir/lan-zeroconf.conf" \
+        "$pkgdir/usr/lib/systemd/system/distccd.service.d/50-$pkgname.conf"
+}

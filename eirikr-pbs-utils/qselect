@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# POSIX qselect wrapper for Slurm squeue
+exec squeue -o "%i" "$@"

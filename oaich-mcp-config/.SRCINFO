@@ -1,0 +1,28 @@
+pkgbase = oaich-mcp-config
+	pkgdesc = Model Context Protocol (MCP) server configuration for CachyOS
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://modelcontextprotocol.io
+	install = oaich-mcp-config.install
+	arch = any
+	license = MIT
+	depends = nodejs
+	depends = python>=3.10
+	depends = uv
+	depends = git
+	depends = sqlite
+	optdepends = postgresql: PostgreSQL MCP server support
+	optdepends = podman: Container operations MCP server
+	optdepends = docker: Alternative to podman for container operations
+	optdepends = chromium: Browser automation with puppeteer/playwright
+	optdepends = mkdocs-material: Generate documentation
+	source = install-mcp-servers.sh
+	source = verify-mcp-setup.sh
+	source = mcp-servers-template.json
+	source = README.md
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = SKIP
+
+pkgname = oaich-mcp-config

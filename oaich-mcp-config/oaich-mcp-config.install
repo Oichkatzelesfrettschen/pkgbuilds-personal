@@ -1,0 +1,42 @@
+post_install() {
+  printf '%s\n' ""
+  printf '%s\n' "=== Oaich-mcp-config installed ==="
+  printf '%s\n' ""
+  printf '%s\n' "MCP server configuration scripts installed to:"
+  printf '%s\n' "  /usr/share/Oaich-mcp-config/"
+  printf '%s\n' ""
+  printf '%s\n' "To install MCP servers, run:"
+  printf '%s\n' "  /usr/share/Oaich-mcp-config/install-mcp-servers.sh"
+  printf '%s\n' ""
+  printf '%s\n' "To verify setup, run:"
+  printf '%s\n' "  /usr/share/Oaich-mcp-config/verify-mcp-setup.sh"
+  printf '%s\n' ""
+  printf '%s\n' "Documentation:"
+  printf '%s\n' "  /usr/share/doc/Oaich-mcp-config/README.md"
+  printf '%s\n' ""
+}
+
+post_upgrade() {
+  printf '%s\n' ""
+  printf '%s\n' "=== Oaich-mcp-config upgraded ==="
+  printf '%s\n' ""
+  printf '%s\n' "Review changes in:"
+  printf '%s\n' "  /usr/share/doc/Oaich-mcp-config/README.md"
+  printf '%s\n' ""
+  printf '%s\n' "Re-run installation if needed:"
+  printf '%s\n' "  /usr/share/Oaich-mcp-config/install-mcp-servers.sh"
+  printf '%s\n' ""
+}
+
+post_remove() {
+  printf '%s\n' ""
+  printf '%s\n' "=== Oaich-mcp-config removed ==="
+  printf '%s\n' ""
+  printf '%s\n' "MCP servers are NOT automatically removed."
+  printf '%s\n' "To remove MCP servers, run:"
+  printf '%s\n' "  claude mcp remove <server-name> -s user"
+  printf '%s\n' ""
+  printf '%s\n' "To list installed servers:"
+  printf '%s\n' "  claude mcp list"
+  printf '%s\n' ""
+}

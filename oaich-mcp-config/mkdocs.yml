@@ -1,0 +1,93 @@
+site_name: Oaich MCP Configuration
+site_description: Model Context Protocol server configuration for CachyOS
+site_author: Oaich
+repo_url: https://github.com/yourusername/Oaich-mcp-config
+edit_uri: edit/master/docs/
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+    - toc.follow
+
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search:
+      lang: en
+  - tags
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - def_list
+  - tables
+  - footnotes
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Configuration: getting-started/configuration.md
+      - Verification: getting-started/verification.md
+  - MCP Servers:
+      - Overview: servers/overview.md
+      - Core Servers: servers/core.md
+      - POSIX Servers: servers/posix.md
+      - Development Servers: servers/development.md
+      - Browser Automation: servers/browser.md
+  - Advanced:
+      - Custom Servers: advanced/custom-servers.md
+      - POSIX Compliance: advanced/posix-compliance.md
+      - Troubleshooting: advanced/troubleshooting.md
+  - Reference:
+      - Commands: reference/commands.md
+      - Configuration Files: reference/configuration.md
+      - Server Catalog: reference/server-catalog.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/modelcontextprotocol
+    - icon: fontawesome/solid/globe
+      link: https://modelcontextprotocol.io
+
+copyright: Copyright &copy; 2025 Oaich

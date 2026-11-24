@@ -1,0 +1,56 @@
+{
+  "suite_version": "4",
+  "arms": [
+    "C-split-q4km-ctx16k",
+    "E-resident-q2kxl-ctx16k"
+  ],
+  "tier": "standard",
+  "served_context": 16384,
+  "chat_template_sha256": "12827f24b742ea4e80cdc12dbcf9622227056b9f797252a3149263d4f9aaadce",
+  "equality_checks": {
+    "served context": "verified equal",
+    "chat template": "verified equal"
+  },
+  "tasks_compared": 15,
+  "tasks_excluded": [
+    "reason-units"
+  ],
+  "excluded_reason": {
+    "reason-units": {
+      "C-split-q4km-ctx16k": "exact match",
+      "E-resident-q2kxl-ctx16k": "unusable: finish_reason=length"
+    }
+  },
+  "score_overall": {
+    "C-split-q4km-ctx16k": 1.0,
+    "E-resident-q2kxl-ctx16k": 1.0
+  },
+  "score_by_category": {
+    "C-split-q4km-ctx16k": {
+      "adherence": 1.0,
+      "code": 1.0,
+      "reasoning": 1.0,
+      "retrieval": 1.0,
+      "structured": 1.0
+    },
+    "E-resident-q2kxl-ctx16k": {
+      "adherence": 1.0,
+      "code": 1.0,
+      "reasoning": 1.0,
+      "retrieval": 1.0,
+      "structured": 1.0
+    }
+  },
+  "tasks_by_category": {
+    "adherence": 2,
+    "code": 3,
+    "reasoning": 3,
+    "retrieval": 5,
+    "structured": 2
+  },
+  "wall_s_total": {
+    "C-split-q4km-ctx16k": 1707.5,
+    "E-resident-q2kxl-ctx16k": 279.1
+  },
+  "disagreements": []
+}

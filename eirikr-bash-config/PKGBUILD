@@ -1,0 +1,64 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+
+pkgname=eirikr-bash-config
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Comprehensive Bash configuration with modern CLI tool support and development shortcuts"
+arch=('any')
+url="https://github.com/yourusername/eirikr-bash-config"
+license=('MIT')
+depends=('bash' 'coreutils')
+optdepends=(
+    'eza: Modern ls replacement with icons and colors'
+    'bat: Modern cat replacement with syntax highlighting'
+    'fd: Modern find replacement'
+    'ripgrep: Fast grep alternative'
+    'zoxide: Smarter cd command'
+    'ranger: Console file manager'
+    'neovim: Modern vim alternative'
+    'git: Version control'
+    'docker: Container platform'
+    'python: Python programming language'
+    'nodejs: JavaScript runtime'
+    'npm: Node package manager'
+    'cuda: NVIDIA CUDA toolkit (for GPU computing)'
+)
+source=(
+    'bashrc-shell-options.sh'
+    'bashrc-prompt.sh'
+    'bashrc-environment.sh'
+    'bashrc-aliases.sh'
+    'bashrc-functions.sh'
+    'bashrc-cuda.sh'
+    'bashrc-integrations.sh'
+    'README.md'
+)
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+    # Install all bash configuration modules
+    install -Dm644 "${srcdir}/bashrc-shell-options.sh" \
+        "${pkgdir}/usr/share/${pkgname}/bashrc-shell-options.sh"
+
+    install -Dm644 "${srcdir}/bashrc-prompt.sh" \
+        "${pkgdir}/usr/share/${pkgname}/bashrc-prompt.sh"
+
+    install -Dm644 "${srcdir}/bashrc-environment.sh" \
+        "${pkgdir}/usr/share/${pkgname}/bashrc-environment.sh"
+
+    install -Dm644 "${srcdir}/bashrc-aliases.sh" \
+        "${pkgdir}/usr/share/${pkgname}/bashrc-aliases.sh"
+
+    install -Dm644 "${srcdir}/bashrc-functions.sh" \
+        "${pkgdir}/usr/share/${pkgname}/bashrc-functions.sh"
+
+    install -Dm644 "${srcdir}/bashrc-cuda.sh" \
+        "${pkgdir}/usr/share/${pkgname}/bashrc-cuda.sh"
+
+    install -Dm644 "${srcdir}/bashrc-integrations.sh" \
+        "${pkgdir}/usr/share/${pkgname}/bashrc-integrations.sh"
+
+    # Install documentation
+    install -Dm644 "${srcdir}/README.md" \
+        "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

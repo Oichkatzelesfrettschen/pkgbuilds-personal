@@ -1,0 +1,553 @@
+#!/usr/bin/env python
+"""Choose a block placement that loads and serves, against the VRAM there is.
+
+llama.cpp offers two placements and neither is what a desktop needs. An explicit
+--n-gpu-layers, including the 'all' spelling that resolves to -2, disables
+common_fit_params and aborts the process when the card is short: 'all' with the
+projector loaded dies in clip_init allocating 884.62 MiB after the text model is
+already placed. The 'auto' spelling keeps fitting on and always loads, but it
+reserves --fit-target on every device and block placement is steeply non-linear
+at the top, so the margin is spent at roughly 2x per block: the same checkpoint
+serves 36.71 tok/s with every block resident and 7.15 tok/s at the default
+1024 MiB margin, and 4.00 tok/s when another process holds 900 MiB.
+
+So this predicts the placement from the model's own metadata and the free VRAM
+measured over a window, verifies it by loading, and steps down only when a load
+actually fails. The prediction usually lands, which matters because each attempt
+re-reads gigabytes of weights. A successful decision is cached against the
+inputs that determine it, so a restart under the same conditions costs one load.
+
+The floor is a first-class argument. On a 12282 MiB card, a projector-bearing
+server cannot reach 30 tok/s at any placement, and a tool that quietly serves
+4 tok/s instead of saying so has answered a different question than the one
+asked. --min-tps names the floor and the failure to reach it is reported with
+the knob that would buy it back.
+"""
+import argparse, json, math, os, re, shlex, signal, struct, subprocess, sys, time
+
+# GGUF metadata typing, enough to reach the few keys that set the memory bill.
+T_U8, T_I8, T_U16, T_I16, T_U32, T_I32, T_F32, T_BOOL, T_STR, T_ARR, T_U64, T_I64, T_F64 = range(13)
+_FIX = {T_U8: 'B', T_I8: 'b', T_U16: 'H', T_I16: 'h', T_U32: 'I', T_I32: 'i',
+        T_F32: 'f', T_BOOL: '?', T_U64: 'Q', T_I64: 'q', T_F64: 'd'}
+
+
+def gguf_meta(path, keys):
+    """Read named keys from a GGUF header without mapping the tensor data."""
+    out = {}
+    with open(path, 'rb') as f:
+        magic, ver, n_tensors, n_kv = struct.unpack('<IIQQ', f.read(24))
+        if magic != 0x46554747:
+            raise SystemExit(f"{path}: not a GGUF file")
+
+        def s():
+            (n,) = struct.unpack('<Q', f.read(8))
+            return f.read(n).decode('utf-8', 'replace')
+
+        def val(t):
+            if t in _FIX:
+                c = _FIX[t]
+                return struct.unpack('<' + c, f.read(struct.calcsize(c)))[0]
+            if t == T_STR:
+                return s()
+            if t == T_ARR:
+                et, n = struct.unpack('<IQ', f.read(12))
+                if et in _FIX:
+                    f.read(struct.calcsize(_FIX[et]) * n)
+                    return None
+                for _ in range(n):
+                    val(et)
+                return None
+            raise ValueError(f"gguf type {t}")
+
+        for _ in range(n_kv):
+            k = s()
+            (t,) = struct.unpack('<I', f.read(4))
+            v = val(t)
+            if k in keys:
+                out[k] = v
+    return out
+
+
+def model_shape(path):
+    """Placement slots, executed decoder blocks, and the per-token KV cost.
+
+    Only full-attention blocks hold a growing cache. A hybrid checkpoint that
+    names most of its blocks linear pays KV on the minority, and sizing context
+    against the total block count overstates the bill several-fold.
+
+    Four counts are distinct and only one of them is what `--n-gpu-layers`
+    indexes. llama.cpp b10549 places a suffix over `block_count + 1` slots,
+    `i_gpu_start = block_count + 1 - n_gpu_layers`, with the output tensor
+    occupying the extra slot at index `block_count`. A checkpoint declaring
+    `nextn_predict_layers` spends that many slots on multi-token-prediction
+    blocks an ordinary target-model load does not execute. So for Qwen3.8-27B:
+    66 placement slots, 64 executed decoder blocks, one skipped MTP slot, one
+    output slot -- and
+
+        executed_blocks_on_gpu = clamp(ngl - mtp_slots - output_slots, 0, 64)
+
+    which is why `-ngl 64` runs 62 decoder blocks on the device, not 64.
+    """
+    arch = gguf_meta(path, {'general.architecture'}).get('general.architecture')
+    if not arch:
+        raise SystemExit(f"{path}: no general.architecture")
+    want = {f'{arch}.block_count', f'{arch}.attention.head_count_kv',
+            f'{arch}.attention.key_length', f'{arch}.attention.value_length',
+            f'{arch}.attention.layer_indices_full', f'{arch}.full_attention_interval',
+            f'{arch}.nextn_predict_layers'}
+    m = gguf_meta(path, want)
+    blocks = m.get(f'{arch}.block_count')
+    if not blocks:
+        raise SystemExit(f"{path}: no {arch}.block_count")
+    kv_heads = m.get(f'{arch}.attention.head_count_kv') or 8
+    if isinstance(kv_heads, (list, tuple)):
+        kv_heads = max(kv_heads)
+    k_len = m.get(f'{arch}.attention.key_length') or 128
+    v_len = m.get(f'{arch}.attention.value_length') or k_len
+    interval = m.get(f'{arch}.full_attention_interval')
+    full = blocks // interval if interval else blocks
+    mtp = int(m.get(f'{arch}.nextn_predict_layers') or 0)
+    return {'arch': arch, 'blocks': int(blocks), 'kv_heads': int(kv_heads),
+            'k_len': int(k_len), 'v_len': int(v_len), 'full_blocks': int(full),
+            'slots': int(blocks) + 1, 'mtp_slots': mtp, 'output_slots': 1,
+            'decoder_blocks': int(blocks) - mtp}
+
+
+_KV_BYTES = {'f32': 4.0, 'f16': 2.0, 'bf16': 2.0, 'q8_0': 1.0625,
+             'q5_1': 0.75, 'q5_0': 0.6875, 'q4_1': 0.625, 'q4_0': 0.5625}
+
+
+def kv_mib(shape, ctx, type_k, type_v):
+    """Cache bytes at full occupancy, from the shapes the checkpoint declares."""
+    per = shape['kv_heads'] * shape['full_blocks'] * ctx
+    b = per * (shape['k_len'] * _KV_BYTES.get(type_k, 2.0)
+               + shape['v_len'] * _KV_BYTES.get(type_v, 2.0))
+    return b / (1024 * 1024)
+
+
+def free_mib(sample_seconds, interval=2.0):
+    """Worst-case free VRAM over a window, because a snapshot is not a budget.
+
+    Free memory measured once loaded a 32768 context at 19:40 and failed the
+    same load at 20:28. Total minus free is the honest figure for what the rest
+    of the machine holds: a desktop keeps most of its VRAM in graphics contexts,
+    which --query-compute-apps does not enumerate, and summing that query
+    reported 519 MiB where total minus free showed 1935.
+    """
+    lo = None
+    deadline = time.time() + max(0.0, sample_seconds)
+    while True:
+        out = subprocess.run(
+            ['nvidia-smi', '--query-gpu=memory.free,memory.total',
+             '--format=csv,noheader,nounits'],
+            capture_output=True, text=True)
+        if out.returncode != 0:
+            raise SystemExit("nvidia-smi failed: " + out.stderr.strip())
+        f, t = (int(x) for x in out.stdout.strip().splitlines()[0].split(', '))
+        lo = f if lo is None else min(lo, f)
+        if time.time() >= deadline:
+            return lo, t
+        time.sleep(interval)
+
+
+def predict_ngl(shape, weights_mib, ctx, kv, clip_mib, budget_mib, overhead_mib):
+    """Largest placement whose predicted bill fits the budget.
+
+    The projector and the compute graph are charged in full whatever the layer
+    count, because both are allocated on the device after the blocks are placed
+    and neither shrinks when a block moves to the host. Weight bytes are the
+    only term the layer count moves.
+    """
+    fixed = clip_mib + overhead_mib + kv
+    room = budget_mib - fixed
+    if room <= 0:
+        return 0
+    # File size overstates the device bill. A 9374 MiB checkpoint served a
+    # 16384 context, whose cache is 544 MiB, inside 9720 MiB of card: weights
+    # and buffers together came to 9176, so roughly 200 MiB of the file is
+    # metadata, padding, and tensors the runtime declines to load -- this
+    # checkpoint carries an unused MTP block it warns about by name.
+    resident = weights_mib * 0.98
+    per_block = resident / shape['blocks']
+    # block_count + 1 is the full suffix, not a count one past the blocks: it
+    # covers slot 0 through the output slot at index block_count, which is what
+    # `-ngl all` resolves to. Asking for it places every decoder block. The
+    # output tensor is already on the device well below this -- it sits in the
+    # last slot the suffix reaches -- so nothing is promoted here. What the top
+    # of the ladder buys is the last two host-resident decoder blocks, measured
+    # at 204 MiB for 1.60x.
+    if resident <= room:
+        return shape['slots']
+    return max(0, min(shape['blocks'], int(room // per_block)))
+
+
+def launch(args, rung, extra, log_path):
+    """Start a server at one rung and report how it ended.
+
+    A rung is either a fit margin, which leaves common_fit_params in charge and
+    degrades under pressure, or an explicit layer count, which does not. The
+    margin form is the default because it measured no slower: text-only at
+    --fit-target 64 served 36.35 tok/s against 34.18 for 'all', at the same
+    9720 MiB, and unlike 'all' it loaded rather than aborting when another
+    process held 900 MiB.
+    """
+    cmd = ['llama-server', '--model', args.model, '--threads', str(args.threads),
+           '--ctx-size', str(args.ctx), '--cache-type-k', args.cache_type_k,
+           '--cache-type-v', args.cache_type_v, '--flash-attn', 'on',
+           '--parallel', str(args.parallel), '--host', args.host,
+           '--port', str(args.port), '--alias', args.alias]
+    if args.mmproj:
+        cmd += ['--mmproj', args.mmproj]
+    # 'all' resolves to -2 and, like any explicit count, turns fitting off. That
+    # is intended here: this tool owns the decision, and a silent adjustment
+    # underneath it would make the recorded placement a fiction.
+    if rung['kind'] == 'fit':
+        cmd += ['--n-gpu-layers', 'auto', '--fit-target', str(rung['value'])]
+    else:
+        ngl = rung['value']
+        cmd += ['--n-gpu-layers', 'all' if ngl > shape['blocks'] else str(ngl)]
+    if args.mmproj and args.mmproj_device == 'host':
+        # The vision tower runs once per image during prefill, not once per
+        # token, so its 917 MiB buys nothing on the device while costing about
+        # six blocks -- and blocks near the top are worth roughly 2x each. On
+        # the host the same server serves 33.82 tok/s at 9720 MiB, the
+        # text-only footprint, against 17.08 at the best on-card placement.
+        cmd += ['--no-mmproj-offload']
+    cmd += extra
+    with open(log_path, 'wb') as log:
+        p = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT,
+                             start_new_session=True)
+    deadline = time.time() + args.load_timeout
+    while time.time() < deadline:
+        if p.poll() is not None:
+            return p, 'exited', cmd
+        try:
+            with open(log_path, 'r', errors='replace') as fh:
+                if 'listening on' in fh.read():
+                    return p, 'listening', cmd
+        except FileNotFoundError:
+            pass
+        time.sleep(1.0)
+    return p, 'timeout', cmd
+
+
+def classify(log_path):
+    """Name the allocation that failed, so the step-down is informed."""
+    try:
+        with open(log_path, 'r', errors='replace') as fh:
+            text = fh.read()
+    except OSError:
+        return 'unknown', None
+    m = re.search(r'allocating ([\d.]+) MiB on device \d+: cudaMalloc failed', text)
+    short = float(m.group(1)) if m else None
+    if 'clip_init' in text or 'mtmd_init_from_file' in text:
+        return 'projector', short
+    if 'ggml_gallocr_reserve' in text:
+        return 'compute-graph', short
+    if m:
+        return 'weights', short
+    if 'failed to fit params' in text:
+        return 'fit-declined', short
+    return 'unknown', short
+
+
+def measure_tps(port, alias, timeout=300):
+    """One short greedy generation, rated by the server's own accounting.
+
+    This used to count streamed SSE deltas. That counter measures the harness:
+    it sees only `content` and `reasoning_content`, so a tool call whose tokens
+    arrive as `tool_calls` argument deltas is invisible to it, and even on plain
+    chat it read 33.36 tok/s where the server reported 37.20. Two published
+    figures had to be retracted after being derived from it.
+
+    llama.cpp answers an unstreamed request with a top-level `timings` object
+    carrying `predicted_n` and `predicted_per_second` for the whole emission,
+    whatever kind of token it is. That is the decode rate. The wall-clock rate
+    is kept beside it and named for what it is -- a transport figure that
+    includes prompt evaluation and queueing, and that a buffering server can
+    distort without the decode rate moving at all.
+
+    Returns (decode_tps, transport_tps, note, error).
+    """
+    import urllib.request
+    body = {"model": alias, "max_tokens": 64, "temperature": 0.0,
+            "messages": [{"role": "user",
+                          "content": "Write one plain sentence about tide pools."}]}
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/v1/chat/completions",
+        data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    started = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            d = json.loads(resp.read().decode(errors='replace'))
+    except Exception as e:
+        return None, None, None, f"{type(e).__name__}: {e}"[:120]
+    elapsed = time.time() - started
+    ti = d.get('timings') or {}
+    predicted = ti.get('predicted_n')
+    if not predicted or predicted < 2:
+        # A reasoning model can spend the whole budget in reasoning_content and
+        # return empty content, so an empty answer is not a dead server. An
+        # empty predicted_n is.
+        return None, None, None, "no tokens"
+    transport = predicted / elapsed if elapsed > 0 else None
+    tps = ti.get('predicted_per_second')
+    if tps:
+        return tps, transport, "server timings", None
+    # An OpenAI-compatible backend that reports no timings leaves only the
+    # transport figure, which is a floor on decode rather than a measure of it.
+    return transport, transport, "transport only, no server timings", None
+
+
+def proc_vram(pid):
+    out = subprocess.run(['nvidia-smi', '--query-compute-apps=pid,used_memory',
+                          '--format=csv,noheader,nounits'],
+                         capture_output=True, text=True)
+    for line in out.stdout.splitlines():
+        parts = [x.strip() for x in line.split(',')]
+        if len(parts) == 2 and parts[0] == str(pid):
+            return int(parts[1])
+    return None
+
+
+def cache_key(args, budget):
+    st = os.stat(args.model)
+    mm = os.stat(args.mmproj) if args.mmproj else None
+    return json.dumps({
+        'model': [args.model, st.st_size, int(st.st_mtime)],
+        'mmproj': [args.mmproj, mm.st_size] if mm else None,
+        'ctx': args.ctx, 'k': args.cache_type_k, 'v': args.cache_type_v,
+        'parallel': args.parallel,
+        # Bucketed, because free VRAM never repeats exactly and a decision that
+        # held at 10346 MiB holds at 10352.
+        'budget_bucket': budget // 128,
+    }, sort_keys=True)
+
+
+def main():
+    global shape
+    ap = argparse.ArgumentParser(
+        description="Pick the highest block placement that actually loads.")
+    ap.add_argument('--model', required=True)
+    ap.add_argument('--mmproj', default=None,
+                    help="vision projector; charged in full at every placement")
+    ap.add_argument('--ctx', type=int, default=16384)
+    ap.add_argument('--port', type=int, default=8807)
+    ap.add_argument('--host', default='127.0.0.1')
+    ap.add_argument('--alias', default='qwen38')
+    ap.add_argument('--threads', type=int, default=6,
+                    help="one per physical core; SMT siblings share a load/store path")
+    ap.add_argument('--parallel', type=int, default=1)
+    ap.add_argument('--cache-type-k', default='q8_0')
+    ap.add_argument('--cache-type-v', default='q8_0')
+    ap.add_argument('--min-tps', type=float, default=0.0,
+                    help="floor to report against; 0 disables the check")
+    ap.add_argument('--reserve', type=int, default=384,
+                    help="MiB held back for desktop churn during the run")
+    ap.add_argument('--overhead', type=int, default=200,
+                    help="MiB for the compute graph and non-block tensors")
+    ap.add_argument('--sample-seconds', type=float, default=10.0,
+                    help="window over which free VRAM is minimised, not sampled once")
+    ap.add_argument('--load-timeout', type=float, default=420.0)
+    ap.add_argument('--max-attempts', type=int, default=4)
+    ap.add_argument('--step', type=int, default=4, help="blocks dropped per retry")
+    ap.add_argument('--cache', default=os.path.expanduser(
+        '~/.cache/qwen-lab/placement.json'))
+    ap.add_argument('--no-cache', action='store_true')
+    ap.add_argument('--fit-start', type=int, default=64,
+                    help="first --fit-target rung in MiB; retries multiply it")
+    ap.add_argument('--explicit', action='store_true',
+                    help="ladder on layer count instead of fit margin, which "
+                         "reaches a higher placement and aborts rather than "
+                         "adapting when the card is short")
+    ap.add_argument('--mmproj-device', choices=('host', 'device'), default='host',
+                    help="where the vision tower lives; host keeps every block "
+                         "on the card and costs prefill latency per image")
+    ap.add_argument('--dry-run', action='store_true',
+                    help="print the prediction and the ladder, load nothing")
+    ap.add_argument('extra', nargs='*',
+                    help="further llama-server arguments, after --")
+    args = ap.parse_args()
+
+    shape = model_shape(args.model)
+    weights_mib = os.stat(args.model).st_size / (1024 * 1024)
+    clip_full = (os.stat(args.mmproj).st_size / (1024 * 1024) + 32) if args.mmproj else 0.0
+    # Charged to the device only when it is placed there. With the tower on the
+    # host the same server measured 9720 MiB, the text-only footprint exactly.
+    clip_mib = clip_full if (args.mmproj and args.mmproj_device == 'device') else 0.0
+    free, total = free_mib(args.sample_seconds)
+    budget = int(free - args.reserve)
+    kv = kv_mib(shape, args.ctx, args.cache_type_k, args.cache_type_v)
+
+    print(f"card        {total} MiB total, {free} MiB free at the window minimum")
+    print(f"model       {shape['arch']}, {shape['slots']} placement slots = "
+          f"{shape['decoder_blocks']} decoder blocks "
+          f"({shape['full_blocks']} full-attention) + {shape['mtp_slots']} MTP + "
+          f"{shape['output_slots']} output, {weights_mib:.0f} MiB of weights")
+    print(f"context     {args.ctx} tokens, {kv:.0f} MiB of cache at "
+          f"{args.cache_type_k}/{args.cache_type_v}")
+    if args.mmproj:
+        print(f"projector   {clip_full:.0f} MiB, allocated after the blocks are placed")
+    print(f"budget      {budget} MiB after a {args.reserve} MiB reserve")
+
+    start = predict_ngl(shape, weights_mib, args.ctx, kv, clip_mib, budget, args.overhead)
+    on_card = bool(args.mmproj) and args.mmproj_device == 'device'
+    if args.explicit:
+        ladder = []
+        n = start
+        while len(ladder) < args.max_attempts and n > 0:
+            ladder.append({'kind': 'ngl', 'value': n})
+            n = shape['blocks'] if n > shape['blocks'] else n - args.step
+    else:
+        # Margin ascending: the first rung is the smallest that measured safe,
+        # and each retry buys headroom at a known price. With the projector on
+        # the device the price is steep -- 1024 MiB of margin cost 6.10 tok/s
+        # against 13.58 at 128 -- which is a further reason to keep the tower
+        # on the host.
+        # 64 MiB is where text-only reached 9720 MiB and 36.35 tok/s, matching
+        # the fastest explicit placement. common_fit_params is conservative
+        # inside its own accounting, so a small margin here still left 626 MiB
+        # of the card unclaimed. --reserve prices the prediction; this prices
+        # llama.cpp's own headroom, and they are not the same number.
+        ladder = [{'kind': 'fit', 'value': v}
+                  for v in (args.fit_start, args.fit_start * 4,
+                            args.fit_start * 8, args.fit_start * 16)
+                  ][:args.max_attempts]
+    on_gpu = max(0, min(shape['decoder_blocks'],
+                        start - shape['mtp_slots'] - shape['output_slots']))
+    print(f"prediction  n-gpu-layers {min(start, shape['slots'])} of "
+          f"{shape['slots']} slots, which runs {on_gpu} of "
+          f"{shape['decoder_blocks']} decoder blocks on the device")
+    if args.mmproj:
+        print(f"projector   on the {'device' if on_card else 'host'}"
+              + ("" if on_card else
+                 ", freeing roughly "
+                 f"{clip_full / (weights_mib / shape['blocks']):.0f} blocks"))
+    print("ladder      " + ", ".join(
+        (f"fit-target {r['value']} MiB" if r['kind'] == 'fit'
+         else f"n-gpu-layers {r['value']}") for r in ladder))
+
+    key = cache_key(args, budget)
+    if not args.no_cache and os.path.exists(args.cache):
+        try:
+            with open(args.cache) as fh:
+                hit = json.load(fh).get(key)
+            if hit and hit.get('rung'):
+                r = hit['rung']
+                print(f"cache       a previous run served this at "
+                      f"{r['kind']} {r['value']} and {hit['tps']:.2f} tok/s")
+                ladder = [r] + [x for x in ladder if x != r]
+        except (OSError, ValueError):
+            pass
+
+    if args.dry_run:
+        return 0
+
+    logdir = os.path.expanduser('~/.cache/qwen-lab')
+    os.makedirs(logdir, exist_ok=True)
+    for attempt, rung in enumerate(ladder, 1):
+        log_path = os.path.join(logdir, f'serve-attempt-{attempt}.log')
+        label = (f"fit-target {rung['value']} MiB" if rung['kind'] == 'fit'
+                 else f"n-gpu-layers {rung['value']}")
+        print(f"\nattempt {attempt}: {label}", flush=True)
+        p, how, cmd = launch(args, rung, args.extra, log_path)
+        if how != 'listening':
+            why, short = classify(log_path)
+            if p.poll() is None:
+                p.terminate()
+                try:
+                    p.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+            print(f"  failed at the {why} allocation"
+                  + (f", {short:.0f} MiB short" if short else "")
+                  + f" ({how})")
+            if why == 'projector' and args.mmproj:
+                print("  the projector is charged whatever the layer count, so "
+                      "the next attempt frees block bytes, not projector bytes")
+            time.sleep(6)
+            continue
+
+        vram = proc_vram(p.pid)
+        tps, transport, note, err = measure_tps(args.port, args.alias)
+        print(f"  loaded on {args.host}:{args.port}, {vram} MiB on the card")
+        if tps is None:
+            # A load that succeeds does not prove the configuration serves. At
+            # ngl 64 with the projector and a 4096 context the server reached
+            # 'listening on', took 10212 MiB, and then died inside the first
+            # decode with a CUDA out-of-memory: the graph reserved at load is
+            # not every allocation inference makes. So the probe is a rung of
+            # the ladder, not a report on it.
+            print(f"  loaded but did not serve: {err}")
+            if p.poll() is None:
+                p.terminate()
+                try:
+                    p.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+            else:
+                print(f"  the server died during the probe (exit {p.returncode}); "
+                      f"see {log_path}")
+            time.sleep(6)
+            continue
+        else:
+            print(f"  {tps:.2f} tok/s decode on a short greedy generation "
+                  f"({note})")
+            if transport and note == "server timings":
+                print(f"  {transport:.2f} tok/s end to end, which carries prompt "
+                      "evaluation and the transport and is not a decode rate")
+            if args.min_tps and tps < args.min_tps:
+                deficit = args.min_tps / tps
+                print(f"  BELOW the {args.min_tps:.0f} tok/s floor by {deficit:.1f}x.")
+                if args.mmproj and args.mmproj_device == 'device':
+                    print(f"  the projector holds {clip_full:.0f} MiB on the device. "
+                          "--mmproj-device host moves the vision tower to system "
+                          "memory, which measured 33.82 tok/s against 17.08 and "
+                          "keeps the endpoint multimodal.")
+                elif args.mmproj:
+                    print(f"  the tower is already on the host, so its {clip_full:.0f} "
+                          "MiB is not what is short. Dropping --mmproj entirely frees "
+                          "nothing further on the device.")
+                if kv > 200:
+                    print(f"  the cache holds {kv:.0f} MiB. Halving the context to "
+                          f"{args.ctx // 2} frees {kv / 2:.0f} MiB, which is "
+                          f"{kv / 2 / (weights_mib * 0.98 / shape['blocks']):.0f} blocks.")
+                print("  a checkpoint whose weights leave no room for the cache has no "
+                      "working placement at all, whatever the floor: IQ3_XXS loads at "
+                      "10124 MiB here and dies in the first decode.")
+            elif args.min_tps:
+                print(f"  at or above the {args.min_tps:.0f} tok/s floor")
+            if not args.no_cache and tps:
+                try:
+                    db = {}
+                    if os.path.exists(args.cache):
+                        with open(args.cache) as fh:
+                            db = json.load(fh)
+                    db[key] = {'rung': rung, 'tps': tps, 'vram': vram}
+                    tmp = args.cache + '.tmp'
+                    os.makedirs(os.path.dirname(args.cache), exist_ok=True)
+                    with open(tmp, 'w') as fh:
+                        json.dump(db, fh, indent=1, sort_keys=True)
+                    os.replace(tmp, args.cache)
+                except OSError:
+                    pass
+
+        print(f"  serving on {args.host}:{args.port}")
+        print(f"\n  {' '.join(shlex.quote(c) for c in cmd)}\n", flush=True)
+
+        # The supervisor's decision is made; the server owns the terminal from
+        # here, and a signal to this process is meant for it.
+        def forward(signum, _frame):
+            p.send_signal(signum)
+        for s in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(s, forward)
+        return p.wait()
+
+    print("\nno placement in the ladder loaded. The budget is short of the "
+          "fixed bill: projector and compute graph are charged in full at every "
+          "layer count, so only a smaller context or no projector changes it.")
+    return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

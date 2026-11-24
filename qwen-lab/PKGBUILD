@@ -1,0 +1,148 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+
+# Weight-offload benchmarking harness for local LLM inference. The package owns
+# the immutable tooling -- the MCP server, the runtime scripts, the profile set,
+# and the CUDA bandwidth probe -- and owns nothing that a run writes.
+#
+# The split follows what each file is. The MCP server and scripts are code with
+# a fixed installed location and belong under /usr/lib/qwen-lab with /usr/bin
+# wrappers. The Python environment, the downloaded checkpoints, the per-run
+# directories, and the captured backend help text are mutable state produced by
+# using the tool, and live under QWEN_LAB_HOME (default ~/ai/qwen-lab) where no
+# package upgrade can overwrite them.
+#
+# The vLLM environment stays outside the package deliberately: it resolves its
+# PyTorch CUDA wheel from the installed driver at creation time, which is a
+# host-specific decision that cannot be baked into a distributable artifact.
+# qwen-lab-setup creates it and records the resolved versions as evidence.
+
+pkgname=qwen-lab
+pkgver=1.5.0
+pkgrel=4
+pkgdesc="Weight-offload benchmarking harness for local LLM inference, with an MCP control surface"
+# Nothing here is compiled: the package ships Python, shell, and the two
+# bandwidth probe sources, which are built against the host CUDA and libc
+# at measurement time rather than at package time.
+arch=('any')
+url='https://github.com/Oichkatzelesfrettschen/PKGBUILDS'
+license=('MIT')
+depends=(
+  'python'
+  'python-mcp'
+  'tmux'
+  'uv'
+  'nvidia-utils'
+)
+optdepends=(
+  'cuda: build the pinned host-to-device bandwidth probe, which sets the streaming ceiling'
+  'llama.cpp-cuda: the CPU-split, managed-memory, and fully-resident benchmark arms'
+  'paru: install llama.cpp-cuda from the AUR'
+)
+source=(
+  'qwen_lab_mcp.py'
+  'qwen-lab-telemetry'
+  'qwen-lab-cpu-telemetry'
+  'qwen-lab-cpu-summary'
+  'qwen-lab-bench'
+  'qwen-lab-quality'
+  'qwen-lab-quality-compare'
+  'qwen-lab-serve'
+  'qwen-lab-setup'
+  'qwen-lab.sh'
+  'h2d.cu'
+  'ddr4.c'
+  'profiles.tar'
+  'webui.tar'
+  'README.md'
+  'LICENSE'
+)
+sha256sums=('8b3ff0d0a3efb162ab9d7d15236bb4a983cfa5949d2d8c8221f5ff846a31ddbe'
+            '59426e5f0d788dbc5a761a1cb17b0bfd216d13a27205024f61618bfe9537990a'
+            '2927369e9193ce145b238605376839f93974f95d55cb5bae18d93fe0b46feb49'
+            '0454c2ca1511732111c6b1ec6b1ee622208a95de7c4d1e8848182c281b8ccf97'
+            '5fdcaf2cee9a2c5af95af3aa94a52843964fba71d2f983adb3ac9f9890320880'
+            '83ef0d984c3277c154c1807896cf4d834f029ee0c52d884d8f147b0cb24d0707'
+            '2a07c2b994ce14d5fb1163ab655c9457392d29da19560c0b574cb0a3cedb9c84'
+            '95bc84a0a49d36c15ea99db94aa207a3f2d7a59dc5d7c58d10a844511e000a96'
+            'a81d62c3eacf2858bfd24e5831b248dd32bdd4d810d68bdee00b85cc93e8a894'
+            '93f3e10c1797829701151f9f1a9aa70626e745c3edcafa9504cefdd9fff12cd3'
+            'e98baef36593a79ad6562eec5d0981a01ba686eed136a73ad5accc28e274b3ce'
+            'eb4e32aab8272035844b5168c861ddacef90b40ac56286ee8a3efaebf5265db0'
+            '9312f4749caf750883165290643bde62d584bc0a858345e0e5860e473b9f59e4'
+            '3f30839624bbe3b31e89321ae4fc6f8964d4ebc338f424fb415d9aebe34632cf'
+            '8623be74a21efd21a78558a2944d1fd78cc4c61d6c3e912719424e116ab3ce61'
+            '4293ec68e9ffe49bf11ae43d970c6954e258446f551bf72005f8c6da9cec1f9d')
+
+package() {
+  install -Dm755 "$srcdir/qwen_lab_mcp.py"   "$pkgdir/usr/lib/$pkgname/qwen_lab_mcp.py"
+  install -Dm755 "$srcdir/qwen-lab-telemetry" "$pkgdir/usr/lib/$pkgname/scripts/qwen-lab-telemetry"
+
+  # The host samplers are separate from the device sampler because the two ask
+  # different questions and one of them needs root. A CPU-split arm is decided
+  # by process CPU, package power, and resident set, none of which the
+  # device-global GPU columns can show; package energy comes from perf, which
+  # cannot be launched unattended from a tmux session without a password
+  # prompt, so these stay operator-invoked rather than wired into launch.sh.
+  install -Dm755 "$srcdir/qwen-lab-cpu-telemetry" "$pkgdir/usr/lib/$pkgname/scripts/qwen-lab-cpu-telemetry"
+  install -Dm755 "$srcdir/qwen-lab-cpu-summary"   "$pkgdir/usr/lib/$pkgname/scripts/qwen-lab-cpu-summary"
+  install -Dm755 "$srcdir/qwen-lab-bench"     "$pkgdir/usr/lib/$pkgname/scripts/qwen-lab-bench"
+
+  # Latency selects a mechanism and quality selects a checkpoint, so the lab
+  # needs both. Every scorer is deterministic -- generated code is executed
+  # against fixed assertions, answers are matched exactly, structured output is
+  # parsed, adherence is counted, retrieval is an exact match at a known depth
+  # -- because a model judging a model would add a third quantisation to the
+  # measurement.
+  install -Dm755 "$srcdir/qwen-lab-quality"   "$pkgdir/usr/lib/$pkgname/scripts/qwen-lab-quality"
+
+  # Two reports are comparable only when the suite, tier, haystack length,
+  # served context, and chat template all match, and each of those was a real
+  # near-miss in this lab: one arm's report was stamped with an older suite
+  # because the file was rewritten while the run was in flight, and the first
+  # pair of runs used different haystack lengths at different contexts. The
+  # compare tool refuses a mismatched pair rather than averaging it into a
+  # number that looks like a quality difference and is not one.
+  install -Dm755 "$srcdir/qwen-lab-quality-compare" "$pkgdir/usr/lib/$pkgname/scripts/qwen-lab-quality-compare"
+  # The supervisor is a /usr/bin command rather than a lab script because it is
+  # the thing you run to serve the model, not a thing you run to measure it.
+  # llama.cpp offers a placement that maximises throughput and aborts when the
+  # card is short, and a placement that always loads and costs 5x; neither is
+  # what a desktop needs, so the decision is made here against measured free
+  # VRAM and verified by loading.
+  install -Dm755 "$srcdir/qwen-lab-serve"     "$pkgdir/usr/bin/qwen-lab-serve"
+  install -Dm755 "$srcdir/qwen-lab-setup"     "$pkgdir/usr/bin/qwen-lab-setup"
+  install -Dm644 "$srcdir/h2d.cu"             "$pkgdir/usr/lib/$pkgname/bench/h2d.cu"
+
+  # The DDR4 counterpart to h2d.cu. A CPU-resident layer is bounded by how fast
+  # DDR4 delivers its weights, exactly as a streamed layer is bounded by the
+  # bus, and the AMD data-fabric PMU exposes no die-to-DRAM event this kernel
+  # can name on family 19h model 21h, so the ceiling has to be measured.
+  install -Dm644 "$srcdir/ddr4.c"             "$pkgdir/usr/lib/$pkgname/bench/ddr4.c"
+  install -Dm644 "$srcdir/README.md"          "$pkgdir/usr/share/doc/$pkgname/README.md"
+
+  # MIT carries a per-package copyright notice that the SPDX identifier alone
+  # cannot supply, so Arch expects the text itself under /usr/share/licenses.
+  # The notice covers this subtree; the rest of the repository is not licensed
+  # by it.
+  install -Dm644 "$srcdir/LICENSE"            "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  # Reference profiles. qwen-lab-setup copies these into QWEN_LAB_HOME on first
+  # run rather than symlinking them, because a profile is meant to be edited
+  # during tuning and an upgrade must not discard those edits.
+  install -dm755 "$pkgdir/usr/share/$pkgname/profiles"
+  bsdtar -xf "$srcdir/profiles.tar" -C "$pkgdir/usr/share/$pkgname/profiles"
+
+  # A diagnostic panel, not a better chat client. llama-server embeds the
+  # upstream SvelteKit UI and this build has it, so the reason to serve this one
+  # from --path is its instrumentation: it separates prefill from decode per
+  # request, counts an attachment before the server refuses it, and names an
+  # empty answer as reasoning rather than as a dead server. Each of those exists
+  # because a measurement in this lab was misread for want of it. It costs the
+  # card nothing either way, which is the point: 204 MiB here is the difference
+  # between 24.43 and 39.22 tok/s, and an Electron client measured 103 MiB.
+  install -Dm644 "$srcdir/webui/index.html" "$pkgdir/usr/share/$pkgname/webui/index.html"
+
+  # QWEN_LAB_HOME lets the server find its mutable state; the packaged tree is
+  # read-only and holds none of it.
+  install -Dm644 "$srcdir/qwen-lab.sh" "$pkgdir/etc/profile.d/qwen-lab.sh"
+}

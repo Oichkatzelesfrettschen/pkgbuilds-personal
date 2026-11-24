@@ -1,0 +1,39 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+
+pkgname=eirikr-git-config
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Optimized Git configuration with LFS support, performance enhancements, and global gitignore"
+arch=('any')
+url="https://github.com/yourusername/eirikr-git-config"
+license=('MIT')
+depends=('git')
+optdepends=(
+    'git-lfs: Large file storage support'
+    'git-delta: Enhanced diff viewer'
+)
+source=(
+    'gitconfig.template'
+    'gitignore_global'
+    'git-setup.sh'
+    'README.md'
+)
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+    # Install git configuration template
+    install -Dm644 "${srcdir}/gitconfig.template" \
+        "${pkgdir}/usr/share/${pkgname}/gitconfig.template"
+
+    # Install global gitignore
+    install -Dm644 "${srcdir}/gitignore_global" \
+        "${pkgdir}/usr/share/${pkgname}/gitignore_global"
+
+    # Install setup script
+    install -Dm755 "${srcdir}/git-setup.sh" \
+        "${pkgdir}/usr/bin/eirikr-git-setup"
+
+    # Install documentation
+    install -Dm644 "${srcdir}/README.md" \
+        "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

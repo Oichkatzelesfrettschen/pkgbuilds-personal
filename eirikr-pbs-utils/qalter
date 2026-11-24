@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# POSIX qalter wrapper for Slurm scontrol
+exec scontrol update job "$@"

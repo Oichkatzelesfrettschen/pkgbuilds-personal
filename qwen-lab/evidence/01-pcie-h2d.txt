@@ -1,0 +1,13 @@
+# Sustained pinned H2D, 1 GiB buffer x 30 iters, cudaMemcpyAsync on a dedicated stream
+# Source: bench/h2d.cu, built with nvcc -O2 (CUDA 13.3.1)
+H2D pinned   : 24.06 GiB/s
+D2H pinned   : 24.01 GiB/s
+H2D pageable : 10.96 GiB/s
+
+# Link generation sampled at 4 Hz during the transfer: {2,16} at idle, {4,16} under load.
+# The idle nvidia-smi reading of Gen2 is ASPM downtrain, not a negotiation failure.
+#
+# Consequence: the streamed-weight decode ceiling is
+#   t_token >= streamed_bytes / 24.06 GiB/s
+# 6 GiB/traversal -> 3.9 traversals/s ; 8 GiB -> 3.0 ; 13 GiB -> 1.85
+# Pinned is 2.20x pageable, so any backend that fails to pin loses more than half the ceiling.

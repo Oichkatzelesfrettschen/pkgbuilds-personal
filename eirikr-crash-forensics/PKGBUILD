@@ -1,0 +1,73 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+
+# This workstation resets itself during graphical startup and records nothing.
+# kdumpst ships kernel.panic=-1 with its collection service disabled, pstore
+# has no backend, and save-dumps.sh collects only records whose name contains
+# "dmesg-ramoops", which a reset without an oops or a panic never produces.
+# This package arms the two capture paths that record a silent reset -- the
+# ramoops console zone, written continuously to persistent RAM, and netconsole,
+# which leaves the machine before the reset -- collects what kdumpst skips, and
+# restores the previous kernel command line when it is removed.
+
+pkgname=eirikr-crash-forensics
+pkgver=1.2.0
+pkgrel=1
+pkgdesc="Arm pstore-RAM console capture, netconsole and a readable panic on this workstation, reversibly"
+arch=('any')
+url="https://github.com/Oichkatzelesfrettschen/PKGBUILDS"
+license=('GPL-3.0-or-later')
+depends=('kdumpst' 'systemd' 'iproute2' 'iputils')
+optdepends=('limine: boot entries are regenerated with limine-update when present')
+checkdepends=('shellcheck' 'dash')
+backup=('etc/sysctl.d/99-panic-readable.conf'
+        'etc/kdumpst.d/50-pstore-only.conf'
+        'etc/modprobe.d/50-ramoops-console.conf'
+        'etc/eirikr-crash-forensics/netconsole.conf')
+install=$pkgname.install
+source=('kernel-cmdline-tool.sh'
+        'test-cmdline-tool.sh'
+        'save-console-record.sh'
+        'netconsole-target.sh'
+        '99-panic-readable.conf'
+        '50-pstore-only.conf'
+        '50-ramoops-console.conf'
+        'netconsole.conf'
+        'eirikr-pstore-console-save.service'
+        'netconsole-hangcapture.service')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+check() {
+    # kernel-cmdline-tool.sh edits the file that decides whether this machine
+    # boots, so its syntax and its behavior are both verified at build time
+    # rather than at install time.
+    for script in kernel-cmdline-tool.sh test-cmdline-tool.sh \
+        save-console-record.sh netconsole-target.sh; do
+        shellcheck -S error "$srcdir/$script"
+        dash -n "$srcdir/$script"
+    done
+    sh "$srcdir/test-cmdline-tool.sh" "$srcdir/kernel-cmdline-tool.sh" \
+        "$(mktemp -d "$srcdir/cmdline-test.XXXXXX")"
+}
+
+package() {
+    install -Dm755 "$srcdir/kernel-cmdline-tool.sh" \
+        "$pkgdir/usr/lib/$pkgname/kernel-cmdline-tool.sh"
+    install -Dm755 "$srcdir/save-console-record.sh" \
+        "$pkgdir/usr/lib/$pkgname/save-console-record.sh"
+    install -Dm755 "$srcdir/netconsole-target.sh" \
+        "$pkgdir/usr/lib/$pkgname/netconsole-target.sh"
+
+    install -Dm644 "$srcdir/99-panic-readable.conf" \
+        "$pkgdir/etc/sysctl.d/99-panic-readable.conf"
+    install -Dm644 "$srcdir/50-pstore-only.conf" \
+        "$pkgdir/etc/kdumpst.d/50-pstore-only.conf"
+    install -Dm644 "$srcdir/50-ramoops-console.conf" \
+        "$pkgdir/etc/modprobe.d/50-ramoops-console.conf"
+    install -Dm644 "$srcdir/netconsole.conf" \
+        "$pkgdir/etc/$pkgname/netconsole.conf"
+
+    install -Dm644 "$srcdir/eirikr-pstore-console-save.service" \
+        "$pkgdir/usr/lib/systemd/system/eirikr-pstore-console-save.service"
+    install -Dm644 "$srcdir/netconsole-hangcapture.service" \
+        "$pkgdir/usr/lib/systemd/system/netconsole-hangcapture.service"
+}

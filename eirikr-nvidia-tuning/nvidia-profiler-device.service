@@ -1,0 +1,20 @@
+[Unit]
+Description=Grant the NVIDIA profiler-device capability to the nvidia-profiler group
+Documentation=https://developer.nvidia.com/nvidia-development-tools-solutions-ERR_NVGPUCTRPERM-permission-issue-performance-counters
+# The capability tree appears as the driver initializes, so the unit orders
+# itself after the module load and the script waits out the remaining interval
+# on a bounded deadline rather than racing it.
+After=systemd-modules-load.service
+ConditionPathExists=/proc/driver/nvidia/version
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/eirikr-nvidia-tuning/nvidia-profiler-device-setup.sh
+# The grant lives in a device-node ACL rather than in a file this unit keeps,
+# so a failure leaves the driver's own restrictive default in force and the
+# next profiling attempt is refused rather than silently unprivileged.
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target

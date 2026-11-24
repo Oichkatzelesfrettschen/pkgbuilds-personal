@@ -1,0 +1,20 @@
+# shellcheck shell=sh
+
+post_install() {
+    cat <<'MESSAGE'
+==> eirikr-network installed.
+==> tcp_bbr loads at the next boot, and net.ipv4.tcp_congestion_control only
+==> takes once it has, so apply both now with
+==>   sudo modprobe tcp_bbr && sudo sysctl --system
+==> The resolved policy leaves mDNS to avahi. If avahi is ever removed, .local
+==> resolution goes with it unless LLMNR and MulticastDNS are turned back on in
+==>   /etc/systemd/resolved.conf.d/90-avahi-primary.conf
+MESSAGE
+}
+
+post_remove() {
+    cat <<'MESSAGE'
+==> eirikr-network removed. The running kernel keeps the sysctl values until
+==> the next boot; "sudo sysctl --system" reloads what remains.
+MESSAGE
+}

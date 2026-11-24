@@ -1,0 +1,22 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+
+pkgname=eirikr-fontconfig-spline-default
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Machine-wide fontconfig default: Spline Sans for sans-serif, Spline Sans Mono for monospace"
+arch=('any')
+url='https://www.freedesktop.org/software/fontconfig/fontconfig-user.html'
+license=('GPL-3.0-only')
+depends=('fontconfig' 'ttf-spline-sans' 'ttf-spline-sans-mono')
+source=('52-spline-default.conf')
+sha256sums=('29b3abff3de7edbd4bc324a16d91c683add31ee01d406e3bc20fd5226f42c751')
+
+package() {
+    install -Dm644 "$srcdir/52-spline-default.conf" \
+        "$pkgdir/usr/share/fontconfig/conf.avail/52-spline-default.conf"
+    # 40-fontconfig-config.hook links every conf.default entry into
+    # /etc/fonts/conf.d on install and removes the link on uninstall.
+    install -dm755 "$pkgdir/usr/share/fontconfig/conf.default"
+    ln -s ../conf.avail/52-spline-default.conf \
+        "$pkgdir/usr/share/fontconfig/conf.default/52-spline-default.conf"
+}

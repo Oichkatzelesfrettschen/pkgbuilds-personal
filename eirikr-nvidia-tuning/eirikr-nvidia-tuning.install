@@ -1,0 +1,53 @@
+post_install() {
+    cat <<'EOF'
+==> eirikr-nvidia-tuning installed.
+==> The kernel module options take effect after the next NVIDIA module
+    reload. Easiest path: regenerate the initramfs and reboot.
+==>   sudo mkinitcpio -P
+==> The session environment (environment.d file)
+    takes effect at the next login. Running Plasma sessions keep the old env.
+==>
+==> GPU performance counters are granted to the nvidia-profiler group through
+    the R610 profiler-device capability rather than through the legacy
+    all-users regkey. Two steps remain, and neither needs a reboot:
+==>   sudo systemctl enable --now nvidia-profiler-device.service
+==>   sudo gpasswd -a "$USER" nvidia-profiler
+==> Group membership reaches a process at its next login, so log out and back
+    in before running ncu. Verify with:
+==>   getfacl /dev/nvidia-caps/nvidia-cap"$(awk '$1=="profiler-device"{print $2}' /proc/driver/nvidia-caps/sys-minors)"
+EOF
+}
+
+post_upgrade() {
+    cat <<'EOF'
+==> eirikr-nvidia-tuning upgraded.
+==> 1.3.0 removes the Qt Vulkan environment generator: KWin crashes when
+    QSG_RHI_BACKEND=vulkan reaches it and a Qt Quick effect opens. Log out
+    and back in so no session process keeps the variable.
+==> 1.2.0 moves the session env from /etc/profile.d to
+    /usr/lib/environment.d/60-eirikr-nvidia.conf, drops __GL_SYNC_TO_VBLANK,
+    and adds a generator that sets QSG_RHI_BACKEND=vulkan when NVIDIA Vulkan
+    initializes. Log out and back in to apply.
+==> If module options changed, reboot (or `sudo modprobe -r nvidia_drm
+    nvidia_modeset nvidia && sudo modprobe nvidia_drm modeset=1` from a
+    TTY with no compositor running).
+==>
+==> 1.1.0 drops /etc/modprobe.d/nvidia-ncu-permissions.conf, which set
+    NVreg_RestrictProfilingToAdminUsers=0 and opened GPU performance counters
+    to every local user. pacman leaves a hand-edited copy behind as a
+    .pacsave; remove it, or the regkey keeps widening what the new
+    capability grant deliberately narrows.
+==>   sudo systemctl enable --now nvidia-profiler-device.service
+==>   sudo gpasswd -a "$USER" nvidia-profiler
+EOF
+}
+
+post_remove() {
+    cat <<'EOF'
+==> eirikr-nvidia-tuning removed.
+==> The cachyos-settings packaged /usr/lib/modprobe.d/nvidia.conf is now
+    authoritative again. That file is laptop-oriented
+    (DynamicPowerManagement=0x02). If this is a desktop, you may want to
+    reinstall this package or hand-write equivalent overrides.
+EOF
+}

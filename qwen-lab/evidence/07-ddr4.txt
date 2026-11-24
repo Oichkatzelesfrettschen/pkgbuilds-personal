@@ -1,0 +1,30 @@
+Sustained DDR4 read bandwidth, 5600X3D, measured 2026-08-23 by bench/ddr4.c.
+
+    threads   GiB/s
+          1    10.43
+          2    20.69
+          4    34.00
+          6    35.21
+          8    33.37
+         12    32.12
+
+Peak is 35.21 GiB/s at six threads, one per physical core. Eight and twelve
+threads are slower: SMT siblings share one load/store path, so the second
+thread on a core adds contention without adding a request stream. The whole
+curve is a read of a 2 GiB buffer, sixty-four times the 32 MiB V-Cache, so
+every byte comes from DRAM rather than from L3.
+
+The figure this lab compares against PCIe is the six-thread number, because
+that is the thread count llama.cpp runs its CPU layers on. DDR4 read is 1.46x
+the 24.06 GiB/s pinned host-to-device ceiling in 01-pcie-h2d.txt. Reading a
+host-resident weight into the CPU is therefore cheaper than shipping the same
+weight to the GPU, and that ratio is the whole reason test C can beat test A.
+
+DRAM bandwidth is not sampled per run. The AMD data-fabric PMU is a module
+(CONFIG_PERF_EVENTS_AMD_UNCORE=m); loading amd_uncore registers amd_df and
+amd_l3, but the die-to-DRAM events in this kernel's tables (nps1_die_to_dram)
+are family 19h model 10h server encodings and do not resolve on this desktop
+family 19h model 21h part. A raw event encoding guessed from a manual would
+produce a number nothing could check, so per-run DRAM traffic is reported as
+demand instead: host-resident weight bytes times measured decode rate, against
+the ceiling above. amd_uncore was unloaded again, leaving the host as found.

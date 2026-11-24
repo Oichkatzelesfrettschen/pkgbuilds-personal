@@ -1,0 +1,42 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+pkgname=oichkatzelesfrettschen-zsh-config
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Optimized zsh configuration with fzf-tab, advanced completion, and best practices"
+arch=('any')
+url="https://github.com/Oichkatzelesfrettschen/PKGBUILDS"
+license=('MIT')
+depends=('zsh' 'fzf')
+provides=('eirikr-zsh-config')
+conflicts=('eirikr-zsh-config')
+replaces=('eirikr-zsh-config')
+optdepends=(
+    'fzf-tab-git: Enhanced fuzzy completion with previews'
+    'eza: Modern ls replacement for previews'
+    'bat: Syntax highlighted file previews'
+    'git-delta: Git diff previews'
+    'zsh-autosuggestions: Fish-like suggestions'
+    'zsh-syntax-highlighting: Syntax highlighting'
+    'zsh-history-substring-search: History navigation'
+    'zoxide: Smart directory jumper'
+)
+source=(
+    'zshrc-additions.zsh'
+    'completion-config.zsh'
+    'fzf-tab-config.zsh'
+)
+sha256sums=('97a0e30096f283d32746c4b5f58aec1cdd280637148e889e0066c326fe33dbf5'
+            'e3092c71034d27f8331e1d4722bfb21e0bbcf7fa07ada21f454dae895e49f4b7'
+            '4aebd9beef027df1b644bbe5a55d46191a84b279fa92735a448b3d0e1c858934')
+install=oichkatzelesfrettschen-zsh-config.install
+
+package() {
+    # Install configuration files
+    install -dm755 "${pkgdir}/usr/share/oichkatzelesfrettschen-zsh-config"
+    install -Dm644 "${srcdir}/zshrc-additions.zsh" \
+        "${pkgdir}/usr/share/oichkatzelesfrettschen-zsh-config/zshrc-additions.zsh"
+    install -Dm644 "${srcdir}/completion-config.zsh" \
+        "${pkgdir}/usr/share/oichkatzelesfrettschen-zsh-config/completion-config.zsh"
+    install -Dm644 "${srcdir}/fzf-tab-config.zsh" \
+        "${pkgdir}/usr/share/oichkatzelesfrettschen-zsh-config/fzf-tab-config.zsh"
+}

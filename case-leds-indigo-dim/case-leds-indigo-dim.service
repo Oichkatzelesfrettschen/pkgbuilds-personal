@@ -1,0 +1,20 @@
+[Unit]
+Description=Apply dim static color to case RGB devices via OpenRGB
+# Runs at boot after device enumeration and again after each resume,
+# because DRAM and GPU RGB controllers revert to vendor default effects
+# after power loss while the motherboard Aura controller keeps its
+# hardware static mode.
+After=systemd-udevd.service suspend.target hibernate.target hybrid-sleep.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/case-leds-indigo-dim
+# systemd leaves TimeoutStartSec at infinity for Type=oneshot, so the
+# script's own retry budget would otherwise set how long multi-user.target
+# waits. detect_retries=3 listings at about 4.5s each plus two 2s sleeps
+# and one apply call bound the script near 22s; this cap stops a future
+# OpenRGB change from stalling the boot again.
+TimeoutStartSec=45
+
+[Install]
+WantedBy=multi-user.target suspend.target hibernate.target hybrid-sleep.target

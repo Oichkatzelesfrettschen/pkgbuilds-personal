@@ -1,0 +1,217 @@
+# ============================================================================
+# EIRIKR GLOBAL GITIGNORE
+# ============================================================================
+# This file is used globally across all git repositories
+# Prevents accidental commits of editor files, build artifacts, and OS files
+# ============================================================================
+
+# ============================================================================
+# EDITOR AND IDE FILES
+# ============================================================================
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# JetBrains IDEs (IntelliJ, PyCharm, WebStorm, etc.)
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Vim
+*.swp
+*.swo
+*.swn
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================================================
+# OPERATING SYSTEM FILES
+# ============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+.Trash-*
+
+# ============================================================================
+# BUILD ARTIFACTS AND COMPILED FILES
+# ============================================================================
+
+# Object files
+*.o
+*.obj
+*.ko
+*.elf
+
+# Libraries
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Shared objects
+*.lo
+*.la
+
+# Build directories
+dist/
+build/
+target/
+out/
+bin/
+obj/
+
+# ============================================================================
+# LANGUAGE-SPECIFIC
+# ============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.venv/
+venv/
+ENV/
+env/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+package-lock.json
+yarn.lock
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+target/
+.gradle/
+build/
+
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+
+# Go
+*.exe
+*.test
+*.prof
+vendor/
+
+# C/C++
+*.out
+*.o
+*.so
+*.a
+*.dll
+*.exe
+
+# Ruby
+*.gem
+.bundle/
+vendor/bundle/
+
+# ============================================================================
+# ENVIRONMENT AND SECRETS
+# ============================================================================
+
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+*.crt
+secrets.yml
+credentials.json
+
+# ============================================================================
+# LOGS AND DATABASES
+# ============================================================================
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.sqlite
+*.sqlite3
+*.db
+
+# ============================================================================
+# TEMPORARY FILES
+# ============================================================================
+
+*.tmp
+*.temp
+*.bak
+*.cache
+*.orig
+
+# ============================================================================
+# ARCHIVES
+# ============================================================================
+
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# ============================================================================
+# DOCUMENTATION BUILD
+# ============================================================================
+
+docs/_build/
+docs/.doctrees/
+site/
+
+# ============================================================================
+# END OF GLOBAL GITIGNORE
+# ============================================================================

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://modelcontextprotocol.io/schema/mcp-servers.json",
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "<HOME-DIRECTORY>"],
+      "description": "Secure file operations with access controls"
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "description": "Knowledge graph-based persistent memory"
+    },
+    "everything": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everything"],
+      "description": "Reference server with prompts, resources, and tools"
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "description": "Web content fetching and conversion (Python)"
+    },
+    "time": {
+      "command": "uvx",
+      "args": ["mcp-server-time"],
+      "description": "Time and timezone conversion (Python)"
+    },
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git", "-r", "<HOME-DIRECTORY>"],
+      "description": "Git repository operations (Python)"
+    },
+    "desktop-commander": {
+      "command": "npx",
+      "args": ["-y", "@wonderwhy-er/desktop-commander@latest"],
+      "description": "Comprehensive terminal control and file operations"
+    },
+    "shell-command": {
+      "command": "npx",
+      "args": ["-y", "shell-command-mcp"],
+      "description": "Simple, secure shell command execution"
+    },
+    "npm-search": {
+      "command": "npx",
+      "args": ["-y", "npm-search-mcp-server"],
+      "description": "Search and query npm packages"
+    },
+    "sqlite": {
+      "command": "npx",
+      "args": ["-y", "mcp-sqlite"],
+      "description": "SQLite database operations"
+    },
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost"],
+      "description": "PostgreSQL database operations (requires PostgreSQL)"
+    },
+    "puppeteer": {
+      "command": "npx",
+      "args": ["-y", "puppeteer-mcp-server"],
+      "description": "Browser automation with Puppeteer"
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "playwright-mcp"],
+      "description": "Browser automation with Playwright"
+    },
+    "containers": {
+      "command": "npx",
+      "args": ["-y", "podman-mcp-server"],
+      "description": "Container operations with Podman/Docker"
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "<your-api-key-here>"
+      },
+      "description": "Web search with Brave Search API (requires API key)"
+    }
+  },
+  "notes": {
+    "installation": "Run install-mcp-servers.sh to auto-configure all servers",
+    "verification": "Run verify-mcp-setup.sh to check server health",
+    "python_servers": "fetch, time, git require Python 3.10+ and uvx",
+    "npm_servers": "All other servers require Node.js and npm",
+    "optional_dependencies": {
+      "postgres": "Requires PostgreSQL installed",
+      "containers": "Requires podman or docker",
+      "brave-search": "Requires Brave Search API key"
+    }
+  }
+}

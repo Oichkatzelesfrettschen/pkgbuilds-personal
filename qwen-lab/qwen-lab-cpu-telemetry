@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Sample the host side of a CPU/GPU split run, which the GPU-centric sampler does not.
+
+The C arm moves work off the bus and onto the 5600X3D, so the questions that
+decide it are host-side: how much of the machine the server actually uses, and
+whether the CPU layers are limited by DDR4 delivery or by arithmetic. Package
+power separates those in the same way the thread sweep does -- arithmetic-bound
+work draws power, memory-stalled work does not.
+
+Package energy comes from a co-running `perf stat -a -e power/energy-pkg/`
+because the RAPL sysfs node is root-only and per-sample sudo would cost more
+than it measures. The AMD data-fabric PMU on family 19h model 21h exposes no
+die-to-DRAM event this kernel can name, so DRAM bandwidth is not sampled; the
+demand figure is derived instead from host-resident weight bytes times the
+measured decode rate, against the ceiling in evidence/07-ddr4.txt.
+
+Written to a separate file from telemetry.tsv on purpose: the completed A and E
+runs were measured by the packaged sampler as it stands, and widening its
+columns would leave the matrix comparing rows recorded by different code.
+"""
+
+import argparse, os, time
+
+def cpu_times():
+    with open("/proc/stat") as fh:
+        out = {}
+        for line in fh:
+            if not line.startswith("cpu"):
+                break
+            f = line.split()
+            vals = [int(x) for x in f[1:]]
+            idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+            out[f[0]] = (sum(vals), idle)
+        return out
+
+def proc_times(pid):
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            f = fh.read().rsplit(") ", 1)[1].split()
+        # utime and stime are fields 14 and 15 of the full record.
+        return int(f[11]) + int(f[12])
+    except (OSError, IndexError, ValueError):
+        return None
+
+def proc_rss_kib(pid):
+    try:
+        with open(f"/proc/{pid}/status") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+    except OSError:
+        pass
+    return None
+
+def read_pid(path):
+    try:
+        return int(open(path).read().strip())
+    except (OSError, ValueError):
+        return None
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--pidfile", required=True)
+    ap.add_argument("--interval", type=float, default=1.0)
+    a = ap.parse_args()
+
+    hz = os.sysconf("SC_CLK_TCK")
+    ncpu = os.cpu_count()
+    started = time.time()
+    prev_cpu = cpu_times()
+    prev_proc, prev_t = None, time.time()
+
+    with open(a.out, "w", buffering=1) as fh:
+        cores = [f"core{i}_pct" for i in range(ncpu)]
+        fh.write("wall_s\tcpu_all_pct\tproc_cpu_pct\tproc_rss_kib\tload1\t"
+                 + "\t".join(cores) + "\n")
+        while True:
+            time.sleep(a.interval)
+            now_cpu = cpu_times()
+            pid = read_pid(a.pidfile)
+            now_proc = proc_times(pid) if pid else None
+            now_t = time.time()
+
+            def busy(key):
+                if key not in prev_cpu or key not in now_cpu:
+                    return ""
+                dt = now_cpu[key][0] - prev_cpu[key][0]
+                di = now_cpu[key][1] - prev_cpu[key][1]
+                return f"{100.0 * (dt - di) / dt:.1f}" if dt > 0 else ""
+
+            if now_proc is not None and prev_proc is not None and now_t > prev_t:
+                pcpu = f"{100.0 * (now_proc - prev_proc) / hz / (now_t - prev_t):.1f}"
+            else:
+                pcpu = ""
+            rss = proc_rss_kib(pid) if pid else None
+            load1 = open("/proc/loadavg").read().split()[0]
+
+            fh.write("\t".join([
+                f"{now_t - started:.1f}", busy("cpu"), pcpu,
+                str(rss if rss is not None else ""), load1,
+                *[busy(f"cpu{i}") for i in range(ncpu)],
+            ]) + "\n")
+            prev_cpu, prev_proc, prev_t = now_cpu, now_proc, now_t
+
+if __name__ == "__main__":
+    main()

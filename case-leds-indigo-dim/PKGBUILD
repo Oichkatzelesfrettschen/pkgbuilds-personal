@@ -1,0 +1,34 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+pkgname=case-leds-indigo-dim
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="Set motherboard, DRAM, and GPU RGB LEDs to dim indigo at boot and resume via OpenRGB"
+arch=('any')
+url="https://github.com/Oichkatzelesfrettschen/PKGBUILDS"
+license=('MIT')
+depends=('openrgb')
+backup=('etc/case-leds-indigo-dim.conf')
+install=case-leds-indigo-dim.install
+source=('case-leds-indigo-dim'
+        'case-leds-indigo-dim.service'
+        'case-leds-indigo-dim.conf'
+        'README.md'
+        'LICENSE')
+sha256sums=('8b3cdf6c35695b31ff0f4039e083a6aa42aea1f447358fb66162af7cbafdad38'
+            '38b1464f6c56d0afb2f90f9bbc02a1a8eaf9a582cc6d062cc8ea96cd335a2f09'
+            'fe6a5c9528e2e8e0c524c4a0d8ed5f28a2b119361edfc0d1e695b8ffc7d4058d'
+            '4de6e03cf02d7342b1cafa87262cd46d3a5fcae80dd47e729cfa430da9bf9ff4'
+            'e4b7ceda4ecf6b15967822e61a91c44fedc4131edab31a4e29151c66683988d2')
+
+package() {
+    install -Dm755 case-leds-indigo-dim \
+        "$pkgdir/usr/bin/case-leds-indigo-dim"
+    install -Dm644 case-leds-indigo-dim.service \
+        "$pkgdir/usr/lib/systemd/system/case-leds-indigo-dim.service"
+    install -Dm644 case-leds-indigo-dim.conf \
+        "$pkgdir/etc/case-leds-indigo-dim.conf"
+    install -Dm644 README.md \
+        "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 LICENSE \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

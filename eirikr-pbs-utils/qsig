@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# POSIX qsig wrapper for Slurm scancel (with signal)
+exec scancel -s "$@"

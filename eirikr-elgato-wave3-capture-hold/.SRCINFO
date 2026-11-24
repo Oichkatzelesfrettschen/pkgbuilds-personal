@@ -1,0 +1,12 @@
+pkgbase = eirikr-elgato-wave3-capture-hold
+	pkgdesc = WirePlumber rule that keeps the Elgato Wave:3 capture streaming ahead of playback at one fixed rate
+	pkgver = 1.1.0
+	pkgrel = 1
+	url = https://pipewire.pages.freedesktop.org/wireplumber/daemon/configuration/alsa.html
+	arch = any
+	license = GPL-3.0-only
+	depends = wireplumber>=0.5
+	source = 52-elgato-wave3-capture-hold.conf
+	sha256sums = fa2cefaa72f1b66f5da1556a8a680309954f99a1c8d4ad024c964608df97cc29
+
+pkgname = eirikr-elgato-wave3-capture-hold

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# POSIX qhold wrapper for Slurm scontrol
+exec scontrol hold "$@"
