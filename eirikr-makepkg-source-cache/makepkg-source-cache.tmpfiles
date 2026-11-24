@@ -1,0 +1,5 @@
+#  The cache is written by whichever unprivileged user runs makepkg, and the
+#  package cannot know that user's name. The sticky bit gives the /tmp
+#  arrangement: any user may create an entry, only its owner may remove it.
+d /var/cache/makepkg 0755 root root -
+d /var/cache/makepkg/sources 1777 root root -

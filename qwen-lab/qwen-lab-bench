@@ -1,0 +1,270 @@
+#!/usr/bin/env python3
+"""Measure an OpenAI-compatible endpoint and compare it against the PCIe bound.
+
+Aggregate tokens-per-second hides the thing this lab is trying to see. A
+streamed-weight configuration pays its PCIe cost once per model traversal, so
+its damage lands on inter-token latency, while prefill amortises one transfer
+across many rows and looks healthy at the same time. Time to first token,
+decode rate, and the ITL distribution are therefore reported separately, and
+P95 is reported next to P50 because an unstable or intermittently uncovered
+transfer shows up as a tail rather than as a shifted mean. A flat distribution
+does not by itself prove full overlap: a stall uncovered by the same amount
+every token is equally flat, so read the spread together with the fraction of
+the transfer ceiling below.
+
+The measured decode rate is divided by the PCIe traversal ceiling recorded in
+evidence/01-pcie-h2d.txt. A ratio near or above 1.0 means the run is transfer
+bound and only moving fewer bytes per traversal will help; a ratio far below
+means the bottleneck is somewhere else and the offload settings are not the
+thing to tune.
+
+Only the standard library is used, so this runs against any backend without
+sharing the vLLM environment.
+"""
+
+import argparse
+import json
+import statistics
+import sys
+import time
+import urllib.error
+import urllib.request
+
+# Sustained pinned H2D on this host, measured by bench/h2d.cu.
+# Recorded in evidence/01-pcie-h2d.txt; override with --h2d-gib-s.
+H2D_GIB_S = 24.06
+
+PROMPTS = {
+    "short": "Explain in two sentences why PCIe bandwidth bounds weight streaming.",
+    "code": (
+        "Write a C function that copies a pinned host buffer to a CUDA device "
+        "buffer on a dedicated stream and records an event. Include error checks."
+    ),
+    "long": (
+        "Summarise the tradeoffs between keeping transformer weights resident in "
+        "VRAM at low precision versus streaming higher-precision weights from host "
+        "memory over PCIe. Cover latency, throughput, batching, and quality."
+    ),
+}
+
+
+def stream_once(base_url, model, prompt, max_tokens, temperature, timeout):
+    """One streaming completion. Returns timing plus the emitted text."""
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": True,
+        # vLLM reports true server-side counts in the final chunk when asked.
+        "stream_options": {"include_usage": True},
+    }).encode()
+
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/v1/chat/completions",
+        data=body,
+        headers={"Content-Type": "application/json", "Authorization": "Bearer none"},
+    )
+
+    started = time.perf_counter()
+    ttft = None
+    stamps = []
+    text = []
+    reasoning = []
+    usage = None
+    finish = None
+
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        for raw in resp:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if payload == "[DONE]":
+                break
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+            for choice in chunk.get("choices") or []:
+                # A sample cut off at the token budget is unusable rather than
+                # low quality, and counting characters cannot tell the two
+                # apart: a response truncated mid-answer has a nonzero answer
+                # length. The server says which happened; read it.
+                if choice.get("finish_reason"):
+                    finish = choice["finish_reason"]
+                delta = choice.get("delta") or {}
+                # Qwen3.8 is a reasoning model and emits its chain into
+                # reasoning_content, leaving content null for most of a
+                # response. Counting only content measures zero tokens on a
+                # server that generated hundreds, so both are timed; they are
+                # kept apart because only the answer bears on output quality.
+                thought = delta.get("reasoning_content")
+                answer = delta.get("content")
+                if not thought and not answer:
+                    continue
+                now = time.perf_counter()
+                if ttft is None:
+                    ttft = now - started
+                stamps.append(now)
+                if thought:
+                    reasoning.append(thought)
+                if answer:
+                    text.append(answer)
+
+    total = time.perf_counter() - started
+    # Inter-token latency covers the gaps between emitted tokens, so the first
+    # token is excluded: its cost is prefill and is reported as TTFT.
+    itl = [(b - a) * 1000.0 for a, b in zip(stamps, stamps[1:])]
+    return {
+        "ttft_s": ttft,
+        "total_s": total,
+        "chunks": len(stamps),
+        "itl_ms": itl,
+        "usage": usage,
+        "text": "".join(text),
+        "reasoning": "".join(reasoning),
+        "finish_reason": finish,
+    }
+
+
+def _prompt_cache_fields(usage):
+    """Report how much of the prompt the server actually had to prefill.
+
+    A backend that reports no cache detail is not the same as one that cached
+    nothing, so the unreported case stays null rather than collapsing to zero.
+    """
+    if not usage:
+        return {"prompt_tokens": None, "cached_prompt_tokens": None,
+                "uncached_prompt_tokens": None, "prompt_cache_reported": False}
+    total = usage.get("prompt_tokens")
+    detail = usage.get("prompt_tokens_details") or {}
+    cached = detail.get("cached_tokens")
+    return {
+        "prompt_tokens": total,
+        "cached_prompt_tokens": cached,
+        "uncached_prompt_tokens": (total - cached)
+                                  if (total is not None and cached is not None) else None,
+        "prompt_cache_reported": cached is not None,
+    }
+
+
+def pct(values, q):
+    if not values:
+        return None
+    ordered = sorted(values)
+    idx = min(len(ordered) - 1, max(0, int(round((q / 100.0) * (len(ordered) - 1)))))
+    return ordered[idx]
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--base-url", default="http://127.0.0.1:8801")
+    ap.add_argument("--model", required=True)
+    ap.add_argument("--prompt", default="short",
+                    help=f"one of {sorted(PROMPTS)} or literal text")
+    ap.add_argument("--max-tokens", type=int, default=128)
+    ap.add_argument("--temperature", type=float, default=0.0)
+    ap.add_argument("--reps", type=int, default=3)
+    ap.add_argument("--warmup", type=int, default=1,
+                    help="discarded runs; the first traversal pays cold page-cache cost. "
+                         "Zero measures a server that has served nothing, which is the "
+                         "only way to get an uncached prefill out of a backend whose "
+                         "prompt cache cannot be disabled")
+    ap.add_argument("--timeout", type=float, default=900.0)
+    ap.add_argument("--streamed-gib", type=float, default=0.0,
+                    help="bytes streamed per traversal, to compute the PCIe ceiling")
+    ap.add_argument("--h2d-gib-s", type=float, default=H2D_GIB_S)
+    ap.add_argument("--json-out", default="")
+    ap.add_argument("--label", default="")
+    args = ap.parse_args()
+
+    prompt = PROMPTS.get(args.prompt, args.prompt)
+
+    for i in range(args.warmup):
+        try:
+            stream_once(args.base_url, args.model, prompt, 16, args.temperature, args.timeout)
+        except (urllib.error.URLError, OSError) as exc:
+            sys.stderr.write(f"warmup {i} failed: {exc}\n")
+            return 3
+
+    runs = []
+    for i in range(args.reps):
+        try:
+            runs.append(stream_once(args.base_url, args.model, prompt,
+                                    args.max_tokens, args.temperature, args.timeout))
+        except (urllib.error.URLError, OSError) as exc:
+            sys.stderr.write(f"rep {i} failed: {exc}\n")
+            return 3
+
+    all_itl = [v for r in runs for v in r["itl_ms"]]
+    ttfts = [r["ttft_s"] for r in runs if r["ttft_s"] is not None]
+    # Decode rate excludes prefill: tokens after the first, over the time after
+    # the first. Dividing total tokens by total time would credit decode with
+    # prefill's parallelism and overstate a streamed configuration.
+    rates = [
+        (r["chunks"] - 1) / (r["total_s"] - r["ttft_s"])
+        for r in runs
+        if r["ttft_s"] is not None and r["chunks"] > 1 and r["total_s"] > r["ttft_s"]
+    ]
+
+    report = {
+        "label": args.label,
+        "model": args.model,
+        "base_url": args.base_url,
+        "prompt_key": args.prompt,
+        "max_tokens": args.max_tokens,
+        "reps": args.reps,
+        "ttft_s_p50": pct(ttfts, 50),
+        "ttft_s_mean": statistics.fmean(ttfts) if ttfts else None,
+        "decode_tok_s_p50": pct(rates, 50),
+        "decode_tok_s_mean": statistics.fmean(rates) if rates else None,
+        "itl_ms_p50": pct(all_itl, 50),
+        "itl_ms_p95": pct(all_itl, 95),
+        "itl_ms_max": max(all_itl) if all_itl else None,
+        "samples": len(all_itl),
+        "server_usage": runs[-1]["usage"],
+        # Time to first token is only comparable across backends when the same
+        # number of prompt tokens is actually prefilled. vLLM under a weight
+        # offload configuration reports enable_prefix_caching=False while
+        # llama.cpp reuses most of a repeated prompt from its own cache, so two
+        # runs of this harness on the same prompt can prefill 64 tokens and 4.
+        # Record what the server says it did instead of assuming they match.
+        **_prompt_cache_fields(runs[-1]["usage"]),
+        "sample_text": runs[-1]["text"][:400],
+        "sample_reasoning": runs[-1]["reasoning"][:200],
+        "reasoning_chars": len(runs[-1]["reasoning"]),
+        "answer_chars": len(runs[-1]["text"]),
+        "finish_reasons": [r["finish_reason"] for r in runs],
+        # Anything other than "stop" everywhere means the token budget bound the
+        # output rather than the model ending it, so the sample measures
+        # truncation and not the model.
+        "all_completed": all(r["finish_reason"] == "stop" for r in runs),
+    }
+
+    if args.streamed_gib > 0:
+        ceiling = args.h2d_gib_s / args.streamed_gib
+        report["pcie_ceiling_traversals_s"] = ceiling
+        report["h2d_gib_s"] = args.h2d_gib_s
+        report["streamed_gib_per_traversal"] = args.streamed_gib
+        if report["decode_tok_s_p50"]:
+            ratio = report["decode_tok_s_p50"] / ceiling
+            report["fraction_of_pcie_ceiling"] = ratio
+            report["verdict"] = (
+                "transfer bound: only streaming fewer bytes per traversal will help"
+                if ratio >= 0.85 else
+                "below the transfer ceiling: the limit is not PCIe"
+            )
+
+    out = json.dumps(report, indent=2)
+    if args.json_out:
+        with open(args.json_out, "w") as fh:
+            fh.write(out + "\n")
+    print(out)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

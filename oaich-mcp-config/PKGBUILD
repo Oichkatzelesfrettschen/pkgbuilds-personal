@@ -1,0 +1,46 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+pkgname=oaich-mcp-config
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Model Context Protocol (MCP) server configuration for CachyOS"
+arch=('any')
+url="https://modelcontextprotocol.io"
+license=('MIT')
+depends=(
+  'nodejs'          # npm and npx for JavaScript MCP servers
+  'python>=3.10'    # Python for Python MCP servers
+  'uv'              # Modern Python package manager (provides uvx)
+  'git'             # Required for git MCP server
+  'sqlite'          # Required for sqlite MCP server
+)
+optdepends=(
+  'postgresql: PostgreSQL MCP server support'
+  'podman: Container operations MCP server'
+  'docker: Alternative to podman for container operations'
+  'chromium: Browser automation with puppeteer/playwright'
+  'mkdocs-material: Generate documentation'
+)
+source=(
+  'install-mcp-servers.sh'
+  'verify-mcp-setup.sh'
+  'mcp-servers-template.json'
+  'README.md'
+)
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+install="${pkgname}.install"
+
+package() {
+  # Install scripts to /usr/share
+  install -Dm755 "${srcdir}/install-mcp-servers.sh" \
+    "${pkgdir}/usr/share/${pkgname}/install-mcp-servers.sh"
+  install -Dm755 "${srcdir}/verify-mcp-setup.sh" \
+    "${pkgdir}/usr/share/${pkgname}/verify-mcp-setup.sh"
+
+  # Install template configuration
+  install -Dm644 "${srcdir}/mcp-servers-template.json" \
+    "${pkgdir}/usr/share/${pkgname}/mcp-servers-template.json"
+
+  # Install documentation
+  install -Dm644 "${srcdir}/README.md" \
+    "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

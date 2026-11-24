@@ -1,0 +1,14 @@
+pkgbase = eirikr-fontconfig-spline-default
+	pkgdesc = Machine-wide fontconfig default: Spline Sans for sans-serif, Spline Sans Mono for monospace
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://www.freedesktop.org/software/fontconfig/fontconfig-user.html
+	arch = any
+	license = GPL-3.0-only
+	depends = fontconfig
+	depends = ttf-spline-sans
+	depends = ttf-spline-sans-mono
+	source = 52-spline-default.conf
+	sha256sums = 29b3abff3de7edbd4bc324a16d91c683add31ee01d406e3bc20fd5226f42c751
+
+pkgname = eirikr-fontconfig-spline-default

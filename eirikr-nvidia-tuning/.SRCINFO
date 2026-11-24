@@ -1,0 +1,34 @@
+pkgbase = eirikr-nvidia-tuning
+	pkgdesc = Workstation NVIDIA driver hygiene: desktop-safe modprobe options, single-DRM-provider blacklists, and GL and VA-API session env. Replaces the unowned /etc/profile.d and /etc/modprobe.d hand-edits.
+	pkgver = 1.3.0
+	pkgrel = 1
+	url = https://github.com/oaich/eirikr-nvidia-tuning
+	install = eirikr-nvidia-tuning.install
+	arch = any
+	license = GPL-3.0-or-later
+	depends = nvidia-utils
+	depends = acl
+	optdepends = libva-nvidia-driver: needed for the LIBVA_DRIVER_NAME=nvidia env to resolve
+	optdepends = cachyos-settings: ships /usr/lib/modprobe.d/nvidia.conf which our /etc/ override shadows
+	backup = etc/modprobe.d/nvidia.conf
+	backup = etc/modprobe.d/tty-only-nvidia.conf
+	backup = etc/modprobe.d/nouveau-blacklist.conf
+	backup = etc/modprobe.d/nvidia-uvm-sam.conf
+	source = nvidia.conf
+	source = tty-only-nvidia.conf
+	source = nouveau-blacklist.conf
+	source = 60-eirikr-nvidia.conf
+	source = nvidia-uvm-sam.conf
+	source = nvidia-profiler-device-setup.sh
+	source = nvidia-profiler-device.service
+	source = nvidia-profiler-sysusers.conf
+	sha256sums = f1ca512844e8ea1d3cb92d355563ee359cc3ac0201036e064bcc28d9926a2c41
+	sha256sums = f618fdef20524595d91e0586225659d342f94d6d187015c4d8cc3b407522a667
+	sha256sums = 7b6ba75ccb4af1387cd01946ae5f1832d9ee6316ed3a96168f8677614b8640f4
+	sha256sums = 617e699d1410bf4f36ee421282c643952d5270e2eff6c378dc7a2f29d2d8a29c
+	sha256sums = 17165523474312a9c89b0e2b8762f75c649588d240b3f48bde18d08c41d362be
+	sha256sums = e506dec4fe87deb529aa5928d67c1bf67755db21ec9cca55f27b57b353be738e
+	sha256sums = a8a4b8c7fc5d0913a2c59b867f523b054fa3227a1c627e037c9b8202593a196f
+	sha256sums = ba8b0cbda63770fa2a1d8eb0c996525f9cd41aaf9c3d99dc99f2c021c5bf2cb8
+
+pkgname = eirikr-nvidia-tuning

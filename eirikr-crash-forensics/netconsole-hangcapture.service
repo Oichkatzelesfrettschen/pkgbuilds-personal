@@ -1,0 +1,18 @@
+[Unit]
+Description=Arm netconsole for hard-hang capture
+Documentation=https://docs.kernel.org/networking/netconsole.html
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/eirikr-crash-forensics/netconsole.conf
+# A target that is powered off leaves no ARP entry and the arm fails. That is
+# a capture that did not arm, not a boot fault, so the exit status is logged
+# and ignored rather than failing the unit and the boot transaction.
+ExecStart=-/usr/lib/eirikr-crash-forensics/netconsole-target.sh
+ExecStop=/bin/sh -c '[ -d /sys/kernel/config/netconsole/hangcapture ] && { echo 0 > /sys/kernel/config/netconsole/hangcapture/enabled; rmdir /sys/kernel/config/netconsole/hangcapture; } || true'
+
+[Install]
+WantedBy=multi-user.target

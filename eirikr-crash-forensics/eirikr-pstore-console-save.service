@@ -1,0 +1,16 @@
+[Unit]
+Description=Archive the ramoops console record kdumpst does not collect
+Documentation=https://docs.kernel.org/admin-guide/ramoops.html
+ConditionPathExists=/sys/fs/pstore
+# ramoops is loaded by kdumpst-load.sh, run as this unit's ExecStartPre, so the
+# records do not exist until that unit has completed.
+After=kdumpst-init.service
+Wants=kdumpst-init.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/eirikr-crash-forensics/save-console-record.sh
+
+[Install]
+WantedBy=multi-user.target

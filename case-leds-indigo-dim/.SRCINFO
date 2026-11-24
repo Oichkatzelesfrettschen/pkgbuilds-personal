@@ -1,0 +1,22 @@
+pkgbase = case-leds-indigo-dim
+	pkgdesc = Set motherboard, DRAM, and GPU RGB LEDs to dim indigo at boot and resume via OpenRGB
+	pkgver = 1.1.0
+	pkgrel = 1
+	url = https://github.com/Oichkatzelesfrettschen/PKGBUILDS
+	install = case-leds-indigo-dim.install
+	arch = any
+	license = MIT
+	depends = openrgb
+	backup = etc/case-leds-indigo-dim.conf
+	source = case-leds-indigo-dim
+	source = case-leds-indigo-dim.service
+	source = case-leds-indigo-dim.conf
+	source = README.md
+	source = LICENSE
+	sha256sums = 8b3cdf6c35695b31ff0f4039e083a6aa42aea1f447358fb66162af7cbafdad38
+	sha256sums = 38b1464f6c56d0afb2f90f9bbc02a1a8eaf9a582cc6d062cc8ea96cd335a2f09
+	sha256sums = fe6a5c9528e2e8e0c524c4a0d8ed5f28a2b119361edfc0d1e695b8ffc7d4058d
+	sha256sums = 4de6e03cf02d7342b1cafa87262cd46d3a5fcae80dd47e729cfa430da9bf9ff4
+	sha256sums = e4b7ceda4ecf6b15967822e61a91c44fedc4131edab31a4e29151c66683988d2
+
+pkgname = case-leds-indigo-dim

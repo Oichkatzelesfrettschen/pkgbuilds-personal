@@ -1,0 +1,14 @@
+pkgbase = eirikr-distcc-mesh
+	pkgdesc = Order distccd after the network and the zeroconf daemon on this workstation
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://github.com/Oichkatzelesfrettschen/PKGBUILDS
+	arch = any
+	license = GPL-3.0-or-later
+	depends = distcc
+	depends = systemd
+	optdepends = avahi: advertises distccd when it runs with --zeroconf
+	source = lan-zeroconf.conf
+	sha256sums = SKIP
+
+pkgname = eirikr-distcc-mesh

@@ -1,0 +1,20 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+
+pkgname=eirikr-makepkg-source-cache
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Point makepkg's SRCDEST at a reboot-persistent shared source cache"
+arch=('any')
+url='https://man.archlinux.org/man/makepkg.conf.5'
+license=('GPL-3.0-only')
+depends=('pacman')
+source=('source-cache.conf' 'makepkg-source-cache.tmpfiles')
+sha256sums=('efdc7552c68a81b3fd01813adfffdb355138919105cced648bac2aec34ea90e6'
+            '4558a381921a7886c32ee79882f3c94cd6b36efeeb7542d9465a4108957d0274')
+
+package() {
+    install -Dm644 "$srcdir/source-cache.conf" \
+        "$pkgdir/etc/makepkg.conf.d/source-cache.conf"
+    install -Dm644 "$srcdir/makepkg-source-cache.tmpfiles" \
+        "$pkgdir/usr/lib/tmpfiles.d/makepkg-source-cache.conf"
+}

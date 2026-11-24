@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# POSIX qdel wrapper for Slurm scancel
+exec scancel "$@"

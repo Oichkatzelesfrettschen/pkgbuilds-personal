@@ -1,0 +1,63 @@
+[user]
+	name = __GIT_NAME__
+	email = __GIT_EMAIL__
+
+[init]
+	defaultBranch = main
+
+[core]
+	editor = nano
+	autocrlf = input
+	fsmonitor = true
+	untrackedCache = true
+	excludesfile = /usr/share/eirikr-git-config/gitignore_global
+
+[feature]
+	manyFiles = true
+
+[protocol]
+	version = 2
+
+[filter "lfs"]
+	process = git-lfs filter-process
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+
+[color]
+	ui = auto
+
+[diff]
+	tool = auto
+
+[merge]
+	tool = vimdiff
+	conflictstyle = diff3
+
+[pull]
+	rebase = false
+
+[push]
+	default = simple
+	followTags = true
+
+[fetch]
+	prune = true
+	pruneTags = true
+
+[log]
+	abbrevCommit = true
+	decorate = short
+
+[alias]
+	st = status -sb
+	co = checkout
+	br = branch
+	ci = commit
+	unstage = reset HEAD --
+	last = log -1 HEAD
+	visual = log --graph --oneline --all --decorate
+	amend = commit --amend --no-edit
+	undo = reset --soft HEAD~1
+	wip = commit -am "WIP"
+	stash-all = stash save --include-untracked

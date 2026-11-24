@@ -1,0 +1,9 @@
+[
+  {
+    "sentences": 0,
+    "prompt_tokens": 1,
+    "ttft_s": 1.86,
+    "decode_tok_s": 4.486,
+    "tokens": 44
+  }
+]

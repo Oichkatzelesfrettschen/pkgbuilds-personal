@@ -1,0 +1,20 @@
+pkgbase = eirikr-git-config
+	pkgdesc = Optimized Git configuration with LFS support, performance enhancements, and global gitignore
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://github.com/yourusername/eirikr-git-config
+	arch = any
+	license = MIT
+	depends = git
+	optdepends = git-lfs: Large file storage support
+	optdepends = git-delta: Enhanced diff viewer
+	source = gitconfig.template
+	source = gitignore_global
+	source = git-setup.sh
+	source = README.md
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = SKIP
+
+pkgname = eirikr-git-config

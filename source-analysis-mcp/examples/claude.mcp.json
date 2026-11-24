@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "source-analysis": {
+      "command": "/usr/bin/source-analysis-mcp",
+      "args": [
+        "serve"
+      ]
+    }
+  }
+}

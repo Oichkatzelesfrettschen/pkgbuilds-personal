@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Create the mutable half of the lab: the Python environment, the profile set,
+# and the recorded facts about what got installed.
+#
+# The vLLM environment is built here rather than shipped in the package because
+# `uv pip install vllm --torch-backend=auto` resolves its PyTorch CUDA wheel
+# from the driver present on this machine. That is a host-specific decision, so
+# the resolved versions are captured as evidence instead of being pinned in a
+# recipe that would be wrong on the next host.
+set -euo pipefail
+LAB="${QWEN_LAB_HOME:-$HOME/ai/qwen-lab}"
+SHARE=/usr/share/qwen-lab
+LIB=/usr/lib/qwen-lab
+
+mkdir -p "$LAB"/{evidence,profiles,runs,logs,bench,scripts}
+
+# Profiles are copied, not symlinked: a profile is meant to be edited during
+# tuning, and an upgrade must not discard those edits.
+for p in "$SHARE"/profiles/*.toml; do
+  [ -e "$p" ] || continue
+  dest="$LAB/profiles/$(basename "$p")"
+  if [ -e "$dest" ]; then
+    echo "keeping existing $dest"
+  else
+    install -m644 "$p" "$dest"
+  fi
+done
+
+# Scripts are symlinked so an upgrade reaches them.
+ln -sfn "$LIB/scripts/qwen-lab-telemetry" "$LAB/scripts/qwen-lab-telemetry"
+ln -sfn "$LIB/scripts/qwen-lab-bench"     "$LAB/scripts/qwen-lab-bench"
+ln -sfn "$LIB/bench/h2d.cu"               "$LAB/bench/h2d.cu"
+
+if [ ! -d "$LAB/.venv" ]; then
+  echo "creating the vLLM environment in $LAB/.venv"
+  ( cd "$LAB" && uv venv --python 3.12 --seed \
+      && . .venv/bin/activate \
+      && uv pip install vllm --torch-backend=auto \
+      && uv pip install "huggingface_hub[cli]" \
+      && uv pip freeze > requirements-resolved.txt )
+fi
+
+# The captured help text is what profile validation checks against, so it must
+# describe the builds actually installed here.
+( cd "$LAB" && . .venv/bin/activate \
+  && vllm serve --help=all > evidence/03-vllm-serve-help.txt 2>&1 || true )
+if command -v llama-server >/dev/null 2>&1; then
+  llama-server --help > "$LAB/evidence/05-llama-server-help.txt" 2>&1 || true
+fi
+
+cat > "$LAB/evidence/00-host-baseline.txt" <<BASE
+# Captured $(date -Iseconds) by qwen-lab-setup
+kernel: $(uname -r)
+mem_total_kB: $(awk '/MemTotal/{print $2}' /proc/meminfo)
+mem_available_kB: $(awk '/MemAvailable/{print $2}' /proc/meminfo)
+ulimit_l_kB: $(ulimit -l)
+systemd_oomd: $(systemctl is-active systemd-oomd 2>/dev/null || echo unknown)
+gpu: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo none)
+addressing_mode: $(nvidia-smi -q 2>/dev/null | awk '/Addressing Mode/{print $4}' || echo unknown)
+BASE
+
+echo
+echo "lab ready at $LAB"
+echo "register the MCP server with:"
+echo "  claude mcp add -s user qwen-lab -- uv run --quiet $LIB/qwen_lab_mcp.py"
+echo "then measure the streaming ceiling with the pcie_probe tool before interpreting any result."

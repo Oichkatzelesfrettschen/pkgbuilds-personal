@@ -1,0 +1,28 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+pkgname=eirikr-pbs-utils
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="POSIX qsub-family thin wrappers around Slurm: qsub/qstat/qdel/qhold/qrls/qmove/qmsg/qrerun/qsig/qalter/qselect. Lets HPC scripts written for OpenPBS / Torque run unmodified on a Slurm cluster/host."
+arch=('any')
+url="https://github.com/oaich/eirikr-pbs-utils"
+license=('GPL3')
+depends=('bash' 'slurm-llnl')
+provides=('pbs-tools' 'qsub' 'qstat' 'qdel')
+conflicts=('pbs-tools' 'openpbs' 'torque')
+
+# DECISION: Wrappers go to /usr/bin/ (not /usr/local/bin/, not /usr/lib/eirikr/)
+#           because they ARE meant to be on $PATH for everyone. They shadow
+#           any system pbs-tools install (hence conflicts=).
+
+source=(
+  'qalter' 'qdel' 'qhold' 'qmove' 'qmsg' 'qrerun' 'qrls'
+  'qselect' 'qsig' 'qstat' 'qsub'
+)
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP'
+            'SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+  for cmd in qalter qdel qhold qmove qmsg qrerun qrls qselect qsig qstat qsub; do
+    install -Dm755 "${srcdir}/${cmd}" "${pkgdir}/usr/bin/${cmd}"
+  done
+}

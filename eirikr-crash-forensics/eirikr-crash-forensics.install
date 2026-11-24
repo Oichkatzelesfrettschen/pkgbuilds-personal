@@ -1,0 +1,86 @@
+# shellcheck shell=sh
+
+_tool=/usr/lib/eirikr-crash-forensics/kernel-cmdline-tool.sh
+
+_rebuild_boot_entries() {
+    if command -v limine-update >/dev/null 2>&1; then
+        limine-update >/dev/null 2>&1 ||
+            printf '%s\n' 'eirikr-crash-forensics: limine-update failed; run it by hand before rebooting' >&2
+    fi
+}
+
+_enable_units() {
+    systemctl enable kdumpst-init.service >/dev/null 2>&1 || true
+    systemctl enable eirikr-pstore-console-save.service >/dev/null 2>&1 || true
+    # netconsole-hangcapture is left to the operator: it arms only when the
+    # receiving host answers, and it is the operator who starts the listener.
+}
+
+post_install() {
+    # The snapshot is taken here, not in pre_install, because pacman runs
+    # pre_install before extracting files and the tool does not exist yet at
+    # that point. It runs before apply, so it still records the unmodified
+    # line, and the tool refuses to overwrite an existing snapshot so a
+    # reinstall cannot capture an already-modified line as the legacy one.
+    "$_tool" snapshot
+    "$_tool" apply
+    _rebuild_boot_entries
+    _enable_units
+
+    cat <<'MESSAGE'
+==> eirikr-crash-forensics installed.
+==> Capture arms at the NEXT BOOT, not now: reserve_mem only takes effect when
+==> the kernel reads the new command line. After rebooting check
+==>   grep -o 'reserve_mem=[^ ]*' /proc/cmdline    # expect 16M:4096:ramoops
+==>   cat /sys/module/pstore/parameters/backend    # expect ramoops, not (null)
+==>   cat /sys/module/ramoops/parameters/console_size   # expect 2097152
+==> then prove the path with a deliberate crash:
+==>   echo c | sudo tee /proc/sysrq-trigger
+==> The next boot leaves a dmesg zip under /var/crash/kdumpst/logs/ and the
+==> console record under /var/crash/eirikr-crash-forensics/.
+==>
+==> A sysrq crash proves the PANIC path. This machine keeps nowatchdog, so a
+==> silent hang produces no panic and no kmsg dump: the console record is the
+==> only local evidence of that failure, and netconsole-hangcapture.service is
+==> the only evidence that leaves the machine. Arm it with
+==>   systemctl enable --now netconsole-hangcapture.service
+==> after starting a listener on the host named in
+==> /etc/eirikr-crash-forensics/netconsole.conf.
+MESSAGE
+}
+
+post_upgrade() {
+    # apply is idempotent, so re-running it repairs a command line that another
+    # tool rewrote between upgrades.
+    "$_tool" apply
+    _rebuild_boot_entries
+    _enable_units
+}
+
+pre_remove() {
+    systemctl disable --now kdumpst-init.service >/dev/null 2>&1 || true
+    systemctl disable --now eirikr-pstore-console-save.service >/dev/null 2>&1 || true
+    systemctl disable --now netconsole-hangcapture.service >/dev/null 2>&1 || true
+
+    # The revert runs here, not in post_remove, because pacman deletes the
+    # package's files before post_remove and the tool would already be gone.
+    # Its mirror is the snapshot in post_install, which runs after extraction
+    # for the same reason in reverse.
+    "$_tool" revert
+    _rebuild_boot_entries
+}
+
+post_remove() {
+    cat <<'MESSAGE'
+==> eirikr-crash-forensics removed.
+==> The kernel command line is restored and the boot entries are rebuilt, but
+==> the running kernel keeps its current parameters until the next reboot.
+==> The recorded legacy line is kept at
+==>   /var/lib/eirikr-crash-forensics/kernel-cmdline.pre-install
+==> and archived console records at
+==>   /var/crash/eirikr-crash-forensics/
+==> so a manual restore and the collected evidence both survive; delete those
+==> directories once the restored command line has been confirmed across a
+==> reboot.
+MESSAGE
+}

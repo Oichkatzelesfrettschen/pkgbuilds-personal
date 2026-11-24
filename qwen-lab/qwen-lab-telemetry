@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Sample GPU and host state into a TSV for one run.
+
+The PCIe receive column is the discriminating measurement in this lab. Each
+weight-offload mechanism leaves a different signature in it: the prefetch
+backend issues bulk asynchronous H2D copies and shows tall bursts synchronised
+to decode steps, UVA shows a continuous floor of GPU-initiated host reads, a
+fully resident quant drops to near zero once loading finishes, and llama.cpp
+managed memory shows fault-driven migration traffic in both directions.
+Reading decode rate alone cannot separate those; the rx column can.
+
+`nvidia-smi dmon -s put` supplies rxpci and txpci in MB/s and is the only
+interface on this driver that reports them -- the --query-gpu field set has no
+throughput counter, only link generation and width.
+
+Host columns come from /proc so that pinned memory is visible: VmLck and
+VmRSS of the served process, plus MemAvailable, distinguish a run that pinned
+its offloaded weights from one that silently fell back to pageable memory at
+roughly half the transfer rate.
+"""
+
+import argparse
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+
+COLUMNS = [
+    "wall_s", "gpu_util_pct", "mem_util_pct", "vram_used_mib", "power_w",
+    "temp_c", "rx_pci_mib_s", "tx_pci_mib_s", "pcie_gen", "pcie_width",
+    "proc_rss_kib", "proc_vmlck_kib", "proc_swap_kib",
+    "host_avail_kib", "host_dirty_kib",
+]
+
+
+def read_proc_status(pid):
+    """Return RSS, locked, and swapped kiB for a pid, or zeros if it is gone."""
+    out = {"VmRSS": 0, "VmLck": 0, "VmSwap": 0}
+    if not pid:
+        return out
+    try:
+        with open(f"/proc/{pid}/status") as fh:
+            for line in fh:
+                key = line.split(":", 1)[0]
+                if key in out:
+                    out[key] = int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return out
+
+
+def read_meminfo():
+    avail = dirty = 0
+    try:
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    avail = int(line.split()[1])
+                elif line.startswith("Dirty:"):
+                    dirty = int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return avail, dirty
+
+
+def query_gpu():
+    """VRAM, power, temperature, and link state via the query interface."""
+    fields = ("memory.used,power.draw,temperature.gpu,"
+              "pcie.link.gen.gpucurrent,pcie.link.width.current")
+    try:
+        raw = subprocess.run(
+            ["nvidia-smi", f"--query-gpu={fields}", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip().splitlines()[0]
+        return [p.strip() for p in raw.split(",")]
+    except Exception:
+        return ["0"] * 5
+
+
+def resolve_pid(pid, pidfile, pattern):
+    """Track the served process, re-resolving if it restarts.
+
+    A pidfile is preferred over a pattern because the sampler starts before the
+    server and its own argv contains whatever the pattern would match, so
+    `pgrep -n -f` selects the sampler itself and every host column then
+    describes the sampler rather than the server. The pidfile is written by the
+    launch script from the server's own `$!`, so it cannot name anything else.
+    """
+    if pid and os.path.exists(f"/proc/{pid}"):
+        return pid
+    if pidfile:
+        try:
+            found = int(open(pidfile).read().strip())
+            if os.path.exists(f"/proc/{found}"):
+                return found
+        except (OSError, ValueError):
+            pass
+    if not pattern:
+        return None
+    try:
+        found = subprocess.run(["pgrep", "-n", "-f", pattern],
+                               capture_output=True, text=True, timeout=5).stdout.strip()
+        # Never latch onto this process; that is the failure the pidfile avoids.
+        return int(found) if found and int(found) != os.getpid() else None
+    except Exception:
+        return None
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--out", required=True, help="TSV path to append to")
+    ap.add_argument("--interval", type=float, default=1.0, help="seconds between samples")
+    ap.add_argument("--pid", type=int, default=0, help="served process pid")
+    ap.add_argument("--pidfile", default="", help="file the launcher writes the server pid to")
+    ap.add_argument("--pattern", default="", help="pgrep -f fallback if no pidfile appears")
+    ap.add_argument("--duration", type=float, default=0.0, help="0 means until killed")
+    args = ap.parse_args()
+
+    if not shutil.which("nvidia-smi"):
+        sys.stderr.write("nvidia-smi not found; telemetry cannot start\n")
+        return 2
+
+    # dmon streams one line per sample; the query interface has no PCIe
+    # throughput counter, so the two sources are merged per tick.
+    dmon = subprocess.Popen(
+        ["nvidia-smi", "dmon", "-s", "put", "-d", str(max(1, int(args.interval)))],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+    )
+
+    stop = {"now": False}
+    signal.signal(signal.SIGTERM, lambda *_: stop.__setitem__("now", True))
+    signal.signal(signal.SIGINT, lambda *_: stop.__setitem__("now", True))
+
+    fresh = not os.path.exists(args.out) or os.path.getsize(args.out) == 0
+    started = time.time()
+    pid = args.pid or None
+
+    with open(args.out, "a", buffering=1) as sink:
+        if fresh:
+            sink.write("\t".join(COLUMNS) + "\n")
+        try:
+            for line in dmon.stdout:
+                if stop["now"]:
+                    break
+                if line.lstrip().startswith("#"):
+                    continue
+                parts = line.split()
+                # gpu pwr gtemp mtemp sm mem enc dec jpg ofa rxpci txpci
+                if len(parts) < 12:
+                    continue
+                sm, mem, rx, tx = parts[4], parts[5], parts[10], parts[11]
+                vram, power, temp, gen, width = query_gpu()
+                pid = resolve_pid(pid, args.pidfile, args.pattern)
+                st = read_proc_status(pid)
+                avail, dirty = read_meminfo()
+                sink.write("\t".join(str(v) for v in [
+                    f"{time.time() - started:.1f}", sm, mem, vram, power, temp,
+                    rx, tx, gen, width,
+                    st["VmRSS"], st["VmLck"], st["VmSwap"], avail, dirty,
+                ]) + "\n")
+                if args.duration and time.time() - started >= args.duration:
+                    break
+        finally:
+            dmon.terminate()
+            try:
+                dmon.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                dmon.kill()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

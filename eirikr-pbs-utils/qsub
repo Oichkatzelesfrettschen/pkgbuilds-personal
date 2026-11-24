@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# POSIX qsub wrapper for Slurm sbatch
+exec sbatch "$@"

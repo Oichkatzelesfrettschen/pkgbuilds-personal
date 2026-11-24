@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Compare two quality reports on the tasks both arms actually completed.
+
+A task one arm finished and the other truncated is not a quality difference,
+so the headline figure is computed over the intersection of usable tasks and
+the excluded ones are named rather than dropped silently. Categories are
+averaged before the overall figure so a category with more tasks does not
+outweigh the others, which is the same convention each report uses on its own.
+"""
+
+import argparse
+import json
+import statistics
+import sys
+
+
+def load(path):
+    with open(path) as fh:
+        return json.load(fh)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("reports", nargs=2, help="two qwen-lab-quality JSON files")
+    ap.add_argument("--json-out", default="")
+    args = ap.parse_args()
+
+    a, b = (load(p) for p in args.reports)
+    # Averaging two arms that ran different suites, contexts, templates, or
+    # haystack lengths produces a number that looks like a quality difference
+    # and is not one. Each of these was a real near-miss in this lab.
+    for field, label in (("suite_version", "suite version"),
+                         ("tier", "tier"),
+                         ("retrieval_sentences", "haystack length")):
+        if a.get(field) != b.get(field):
+            sys.stderr.write(f"refusing to compare: different {label} "
+                             f"({a.get(field)!r} against {b.get(field)!r})\n")
+            return 2
+    # A report written before the tool recorded server properties cannot be
+    # checked. Say so in the output rather than refusing it or passing it
+    # silently: an unverified comparison is usable, an unlabelled one is not.
+    sa, sb = a.get("server") or {}, b.get("server") or {}
+    verified = {}
+    for field, label in (("n_ctx", "served context"),
+                         ("chat_template_sha256", "chat template")):
+        if sa.get(field) is None or sb.get(field) is None:
+            verified[label] = "unverified: one report predates this check"
+            sys.stderr.write(f"warning: {label} not recorded in both reports; "
+                             f"verify it by hand\n")
+        elif sa[field] != sb[field]:
+            sys.stderr.write(f"refusing to compare: different {label} "
+                             f"({sa[field]!r} against {sb[field]!r})\n")
+            return 2
+        else:
+            verified[label] = "verified equal"
+
+    ra = {r["id"]: r for r in a["results"]}
+    rb = {r["id"]: r for r in b["results"]}
+    common = sorted(set(ra) & set(rb))
+    both = [i for i in common if ra[i]["score"] is not None and rb[i]["score"] is not None]
+    excluded = [i for i in common if i not in both]
+
+    def fold(rep, ids):
+        by_cat = {}
+        for i in ids:
+            r = rep[i]
+            by_cat.setdefault(r["category"], []).append(r["score"])
+        cats = {k: round(statistics.fmean(v), 4) for k, v in sorted(by_cat.items())}
+        overall = round(statistics.fmean(list(cats.values())), 4) if cats else None
+        return cats, overall
+
+    cats_a, all_a = fold(ra, both)
+    cats_b, all_b = fold(rb, both)
+
+    disagree = [{"id": i, "category": ra[i]["category"],
+                 a["label"]: ra[i]["score"], b["label"]: rb[i]["score"],
+                 f"{a['label']}_detail": ra[i]["detail"],
+                 f"{b['label']}_detail": rb[i]["detail"]}
+                for i in both if ra[i]["score"] != rb[i]["score"]]
+
+    report = {
+        "suite_version": a["suite_version"],
+        "arms": [a["label"], b["label"]],
+        "tier": a.get("tier"),
+        "served_context": sa.get("n_ctx") or sb.get("n_ctx"),
+        "chat_template_sha256": sa.get("chat_template_sha256")
+                                or sb.get("chat_template_sha256"),
+        "equality_checks": verified,
+        "tasks_compared": len(both),
+        "tasks_excluded": excluded,
+        "excluded_reason": {i: {a["label"]: ra[i]["detail"], b["label"]: rb[i]["detail"]}
+                            for i in excluded},
+        "score_overall": {a["label"]: all_a, b["label"]: all_b},
+        "score_by_category": {a["label"]: cats_a, b["label"]: cats_b},
+        "tasks_by_category": {c: sum(1 for i in both if ra[i]["category"] == c)
+                              for c in sorted({ra[i]["category"] for i in both})},
+        "wall_s_total": {a["label"]: a["wall_s_total"], b["label"]: b["wall_s_total"]},
+        "disagreements": disagree,
+    }
+    out = json.dumps(report, indent=2)
+    if args.json_out:
+        with open(args.json_out, "w") as fh:
+            fh.write(out + "\n")
+    print(out)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

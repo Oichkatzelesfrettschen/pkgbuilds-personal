@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# POSIX qstat wrapper for Slurm squeue
+exec squeue "$@"

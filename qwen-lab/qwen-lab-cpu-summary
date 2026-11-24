@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""Summarise the host-side samplers over the decode window only.
+
+The load phase reads the checkpoint from page cache and NVMe, which pins six
+cores on I/O and copy work that decode never repeats. Including it would
+attribute loading's power and utilisation to token generation. The window is
+taken from the samples where the server process is actually burning CPU.
+"""
+import sys, statistics
+
+def pct(v, q):
+    if not v: return None
+    s = sorted(v); i = min(len(s)-1, max(0, int(round(q/100*(len(s)-1)))))
+    return s[i]
+
+cpu_tsv, power_csv = sys.argv[1], sys.argv[2]
+# Loading pins every core on decompression and copies that decode never repeats,
+# so the caller supplies the wall second at which serving began.
+floor_s = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0
+rows = [l.rstrip("\n").split("\t") for l in open(cpu_tsv)]
+head, data = rows[0], rows[1:]
+idx = {k: i for i, k in enumerate(head)}
+
+def col(r, k):
+    v = r[idx[k]] if idx[k] < len(r) else ""
+    try: return float(v)
+    except ValueError: return None
+
+busy = [r for r in data
+        if (col(r, "proc_cpu_pct") or 0) > 50 and (col(r, "wall_s") or 0) >= floor_s]
+if not busy:
+    print("no decode window found"); sys.exit(1)
+lo = data.index(busy[0]); hi = data.index(busy[-1])
+win = data[lo:hi+1]
+wall_lo, wall_hi = col(win[0], "wall_s"), col(win[-1], "wall_s")
+
+ncpu = sum(1 for k in head if k.startswith("core"))
+percore = []
+for i in range(ncpu):
+    vals = [col(r, f"core{i}_pct") for r in win]
+    vals = [v for v in vals if v is not None]
+    percore.append(round(statistics.fmean(vals), 1) if vals else None)
+
+def stat(k):
+    v = [col(r, k) for r in win]; v = [x for x in v if x is not None]
+    return {"p50": pct(v, 50), "p95": pct(v, 95), "max": max(v)} if v else None
+
+print(f"decode window: wall {wall_lo:.0f}-{wall_hi:.0f} s, {len(win)} samples")
+print(f"process CPU pct   {stat('proc_cpu_pct')}")
+print(f"system CPU pct    {stat('cpu_all_pct')}")
+print(f"process RSS GiB   p50 {stat('proc_rss_kib')['p50']/1048576:.2f}  max {stat('proc_rss_kib')['max']/1048576:.2f}")
+print(f"per-core mean pct {percore}")
+
+# perf -I emits joules per interval, so each row is already watts at 1 s.
+w = []
+for line in open(power_csv):
+    f = line.strip().split(",")
+    if len(f) > 3 and "energy-pkg" in line:
+        try:
+            t = float(f[0]); j = float(f[1])
+        except ValueError:
+            continue
+        if wall_lo <= t <= wall_hi:
+            w.append(j)
+print(f"package power W   p50 {pct(w,50)}  p95 {pct(w,95)}  mean {statistics.fmean(w):.1f}  n={len(w)}" if w
+      else "package power W   no samples in window")

@@ -1,0 +1,8 @@
+# Captured 2026-08-23T15:01:47-07:00 by qwen-lab-setup
+kernel: 7.1.8-1-cachyos
+mem_total_kB: 32763520
+mem_available_kB: 20289348
+ulimit_l_kB: 8192
+systemd_oomd: active
+gpu: NVIDIA GeForce RTX 4070 Ti, 12282 MiB
+addressing_mode: HMM

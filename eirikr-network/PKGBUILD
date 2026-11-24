@@ -1,0 +1,87 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+
+# One package for this workstation's networking, replacing eirikr-network-config
+# and eirikr-network-fixes. Those two were built and never installed, and they
+# disagreed: network-fixes enabled LLMNR and MulticastDNS in systemd-resolved so
+# it would own mDNS, while the machine runs avahi-daemon and carries the
+# opposite policy in /etc/systemd/resolved.conf.d. Installing either as staged
+# would have changed name resolution on a machine whose LAN inventory depends on
+# it. This package carries the direction the machine runs and drops the
+# systemd-networkd pieces both shipped, because networkd is disabled here and
+# NetworkManager is what is enabled.
+#
+# Neither ships an ethtool tuning service either. The one they carried targeted
+# enp7s0 while calling itself rtl8125, and on this machine enp7s0 is the RTL8126
+# 5GbE port with no cable while enp10s0 is the RTL8125. Pointed at the right
+# interface it still changes nothing: ethtool reports all eight offloads already
+# on, EEE already disabled, fq_codel already the qdisc, and the ring buffers
+# already at the hardware maximum, which on this part is 256 rather than the
+# 4096 the script asked for. Running it bounced the link for a second and
+# altered no setting, so the service is not carried forward.
+
+pkgname=eirikr-network
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="Wired link tuning, ethernet priority, BBR, and the resolved policy that leaves mDNS to avahi"
+arch=('any')
+url="https://github.com/Oichkatzelesfrettschen/PKGBUILDS"
+license=('GPL-3.0-or-later')
+depends=('systemd')
+optdepends=('networkmanager: the ethernet priority drop-in applies to it'
+            'avahi: owns mDNS under this resolved policy'
+            'iw: the regulatory domain helper falls back to it')
+provides=('eirikr-network-config' 'eirikr-network-fixes')
+conflicts=('eirikr-network-config' 'eirikr-network-fixes')
+replaces=('eirikr-network-config' 'eirikr-network-fixes')
+checkdepends=('shellcheck' 'bash')
+backup=('etc/sysctl.d/99-network-performance.conf'
+        'etc/NetworkManager/conf.d/99-ethernet-priority.conf'
+        'etc/NetworkManager/conf.d/20-wifi-performance.conf'
+        'etc/NetworkManager/conf.d/20-dns-systemd-resolved.conf'
+        'etc/NetworkManager/conf.d/20-ignore-wifi-p2p.conf'
+        'etc/modules-load.d/tcp-bbr.conf'
+        'etc/modules-load.d/netfilter.conf'
+        'etc/systemd/resolved.conf.d/90-avahi-primary.conf')
+install=$pkgname.install
+source=('99-network-performance.conf'
+        '99-ethernet-priority.conf'
+        'wifi-performance.conf'
+        'dns-systemd-resolved.conf'
+        '20-ignore-wifi-p2p.conf'
+        'tcp-bbr.conf'
+        'netfilter.conf'
+        '90-avahi-primary.conf'
+        'regulatory-domain.sh')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+check() {
+    shellcheck -S error "$srcdir/regulatory-domain.sh"
+    bash -n "$srcdir/regulatory-domain.sh"
+}
+
+package() {
+    install -Dm644 "$srcdir/99-network-performance.conf" \
+        "$pkgdir/etc/sysctl.d/99-network-performance.conf"
+    install -Dm644 "$srcdir/99-ethernet-priority.conf" \
+        "$pkgdir/etc/NetworkManager/conf.d/99-ethernet-priority.conf"
+    install -Dm644 "$srcdir/wifi-performance.conf" \
+        "$pkgdir/etc/NetworkManager/conf.d/20-wifi-performance.conf"
+    install -Dm644 "$srcdir/dns-systemd-resolved.conf" \
+        "$pkgdir/etc/NetworkManager/conf.d/20-dns-systemd-resolved.conf"
+    install -Dm644 "$srcdir/20-ignore-wifi-p2p.conf" \
+        "$pkgdir/etc/NetworkManager/conf.d/20-ignore-wifi-p2p.conf"
+
+    # Both modules carry a sysctl that does not exist until they are loaded.
+    install -Dm644 "$srcdir/tcp-bbr.conf" \
+        "$pkgdir/etc/modules-load.d/tcp-bbr.conf"
+    install -Dm644 "$srcdir/netfilter.conf" \
+        "$pkgdir/etc/modules-load.d/netfilter.conf"
+    install -Dm644 "$srcdir/90-avahi-primary.conf" \
+        "$pkgdir/etc/systemd/resolved.conf.d/90-avahi-primary.conf"
+
+    # /usr/lib rather than /usr/local/bin, where the scripts this replaces
+    # lived. /usr/local is the administrator's tree, and a package owning a path
+    # there is what left the old unit inert and unowned in the first place.
+    install -Dm755 "$srcdir/regulatory-domain.sh" \
+        "$pkgdir/usr/lib/$pkgname/regulatory-domain.sh"
+}

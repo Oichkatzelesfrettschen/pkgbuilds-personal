@@ -1,0 +1,87 @@
+#!/bin/sh
+# Apply a single dim static color to internal case RGB devices
+# (motherboard Aura controller, DRAM modules, GPU) through OpenRGB,
+# leaving USB peripherals such as keyboards and mice untouched.
+#
+# OpenRGB 1.0 prints one "<index>: <name>" line per device for
+# --list-devices and reports no device type, so a name pattern from
+# /etc/case-leds-indigo-dim.conf classifies each device. Both the
+# classification and the indices it emits come from a single listing,
+# so an unplugged peripheral renumbering the list cannot move a device
+# under a pattern that does not name it.
+set -eu
+
+config_file=/etc/case-leds-indigo-dim.conf
+
+# Indigo (#4B0082) scaled to 10 percent brightness.
+led_color=08000D
+motherboard_mode=static
+default_mode=direct
+motherboard_match='*TUF GAMING B550*'
+dram_match='*Vengeance*'
+gpu_match='*GeForce*'
+detect_retries=3
+detect_interval=2
+
+if [ -r "$config_file" ]; then
+    # shellcheck source=/dev/null
+    . "$config_file"
+fi
+
+list_devices() {
+    openrgb --noautoconnect --list-devices 2>/dev/null |
+        sed -n 's/^\([0-9][0-9]*\): \(.*\)$/\1 \2/p'
+}
+
+# The Aura controller is a USB HID device the kernel enumerates before
+# systemd starts, so the first listing normally already carries it. The
+# retry budget covers a controller that loses an SMBus arbitration round
+# and bounds the worst case at detect_retries listings plus the sleeps
+# between them; TimeoutStartSec in the unit file exceeds that bound.
+#
+# A device behind a driver that loads later than this service, such as
+# the GPU controller on an NVIDIA i2c adapter, is absent from the
+# listing and keeps its vendor default until the resume run or a manual
+# re-run. Only the motherboard controller is required.
+attempt=1
+while :; do
+    motherboard_found=0
+    command_args=''
+
+    # A here-document keeps the loop in the current shell, so the
+    # assignments below survive it; a pipeline would discard them.
+    while IFS=' ' read -r device_index device_name; do
+        [ -n "$device_index" ] || continue
+        # Patterns are globs by design, matched against the device name.
+        # shellcheck disable=SC2254
+        case "$device_name" in
+            $motherboard_match)
+                mode=$motherboard_mode
+                motherboard_found=1
+                ;;
+            $dram_match|$gpu_match)
+                mode=$default_mode
+                ;;
+            *)
+                continue
+                ;;
+        esac
+        command_args="$command_args -d $device_index -m $mode -c $led_color"
+    done <<DEVICES
+$(list_devices)
+DEVICES
+
+    [ "$motherboard_found" -eq 1 ] && break
+
+    if [ "$attempt" -ge "$detect_retries" ]; then
+        echo "case-leds-indigo-dim: no device matching $motherboard_match in $attempt listings" >&2
+        exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep "$detect_interval"
+done
+
+# Indices, modes, and the color contain no whitespace; word splitting is
+# the intended argv construction.
+# shellcheck disable=SC2086
+exec openrgb --noautoconnect $command_args

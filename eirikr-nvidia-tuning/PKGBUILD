@@ -1,0 +1,111 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+pkgname=eirikr-nvidia-tuning
+pkgver=1.3.0
+pkgrel=1
+pkgdesc="Workstation NVIDIA driver hygiene: desktop-safe modprobe options, single-DRM-provider blacklists, and GL and VA-API session env. Replaces the unowned /etc/profile.d and /etc/modprobe.d hand-edits."
+arch=('any')
+url="https://github.com/oaich/eirikr-nvidia-tuning"
+license=('GPL-3.0-or-later')
+depends=('nvidia-utils' 'acl')
+optdepends=(
+  'libva-nvidia-driver: needed for the LIBVA_DRIVER_NAME=nvidia env to resolve'
+  'cachyos-settings: ships /usr/lib/modprobe.d/nvidia.conf which our /etc/ override shadows'
+)
+
+# DECISION: Bundle everything that touches the NVIDIA driver at the
+#           system-config layer (modprobe + session environment) in one package, but
+#           keep nvidia-oc-nvml related units OUT — those are a separate
+#           tuning concern (clocks/power) handled by their own package and
+#           local override.
+# WHY: One pacman -Q answers "are my NVIDIA hand-tweaks installed and current"
+#      instead of grepping /etc.
+# HOW: install -Dm644 every config file under its target /etc/ path.
+
+source=(
+  'nvidia.conf'
+  'tty-only-nvidia.conf'
+  'nouveau-blacklist.conf'
+  '60-eirikr-nvidia.conf'
+  'nvidia-uvm-sam.conf'
+  'nvidia-profiler-device-setup.sh'
+  'nvidia-profiler-device.service'
+  'nvidia-profiler-sysusers.conf'
+)
+
+sha256sums=('f1ca512844e8ea1d3cb92d355563ee359cc3ac0201036e064bcc28d9926a2c41'
+            'f618fdef20524595d91e0586225659d342f94d6d187015c4d8cc3b407522a667'
+            '7b6ba75ccb4af1387cd01946ae5f1832d9ee6316ed3a96168f8677614b8640f4'
+            '617e699d1410bf4f36ee421282c643952d5270e2eff6c378dc7a2f29d2d8a29c'
+            '17165523474312a9c89b0e2b8762f75c649588d240b3f48bde18d08c41d362be'
+            'e506dec4fe87deb529aa5928d67c1bf67755db21ec9cca55f27b57b353be738e'
+            'a8a4b8c7fc5d0913a2c59b867f523b054fa3227a1c627e037c9b8202593a196f'
+            'ba8b0cbda63770fa2a1d8eb0c996525f9cd41aaf9c3d99dc99f2c021c5bf2cb8')
+
+# DECISION: backup= covers files in /etc/ that the user might legitimately
+#           hand-edit later. pacman will preserve their version on upgrade
+#           by writing .pacnew alongside the new shipped file rather than
+#           silently overwriting.
+backup=(
+  'etc/modprobe.d/nvidia.conf'
+  'etc/modprobe.d/tty-only-nvidia.conf'
+  'etc/modprobe.d/nouveau-blacklist.conf'
+  'etc/modprobe.d/nvidia-uvm-sam.conf'
+)
+
+install='eirikr-nvidia-tuning.install'
+
+package() {
+  # ============================================================================
+  # MODPROBE OPTIONS - kernel module load-time configuration
+  # ============================================================================
+  # nvidia.conf: NVreg_* options; replaces the same-name cachyos-settings
+  # file under /usr/lib/modprobe.d/, so it restates that file's option.
+  install -Dm644 "${srcdir}/nvidia.conf" \
+    "${pkgdir}/etc/modprobe.d/nvidia.conf"
+
+  # ============================================================================
+  # MODPROBE BLACKLISTS - keep NVIDIA the sole DRM provider
+  # ============================================================================
+  # tty-only-nvidia.conf: block every other graphics module from auto-loading.
+  install -Dm644 "${srcdir}/tty-only-nvidia.conf" \
+    "${pkgdir}/etc/modprobe.d/tty-only-nvidia.conf"
+
+  # nouveau-blacklist.conf: belt-and-braces nouveau lockout (also disables KMS).
+  install -Dm644 "${srcdir}/nouveau-blacklist.conf" \
+    "${pkgdir}/etc/modprobe.d/nouveau-blacklist.conf"
+
+  # ============================================================================
+  # SESSION ENVIRONMENT - read by the systemd user manager at start
+  # ============================================================================
+  # 60-eirikr-nvidia.conf: __GL_YIELD=USLEEP and LIBVA_DRIVER_NAME=nvidia.
+  # environment.d reaches every unit of the user manager whatever display
+  # manager or login shell started the session; profile.d reaches only
+  # login shells. __GL_SYNC_TO_VBLANK stays unset (see the file).
+  install -Dm644 "${srcdir}/60-eirikr-nvidia.conf" \
+    "${pkgdir}/usr/lib/environment.d/60-eirikr-nvidia.conf"
+
+  # nvidia-uvm-sam.conf: UVM migrates system-allocated memory into VRAM.
+  install -Dm644 "${srcdir}/nvidia-uvm-sam.conf" \
+    "${pkgdir}/etc/modprobe.d/nvidia-uvm-sam.conf"
+
+  # ============================================================================
+  # PROFILING CAPABILITY - counters for one group rather than for every user
+  # ============================================================================
+  # DECISION: grant the R610 profiler-device capability to a dedicated group
+  #           instead of shipping NVreg_RestrictProfilingToAdminUsers=0.
+  # WHY: The regkey opens GPU performance counters to every local user and
+  #      NVIDIA states it is superseded and slated for removal. The capability
+  #      is the narrow replacement: read permission on one device node grants
+  #      profiling to that group's members and to nobody else, the restrictive
+  #      default stays in force, and no reboot is needed to apply it.
+  # HOW: a oneshot resolves the minor from sys-minors at every boot, creates
+  #      the node, applies the group ACL, sets DeviceFileModify: 0 so a later
+  #      NVIDIA tool cannot recreate the node over the grant, and verifies
+  #      each step before exiting.
+  install -Dm755 "${srcdir}/nvidia-profiler-device-setup.sh" \
+    "${pkgdir}/usr/lib/${pkgname}/nvidia-profiler-device-setup.sh"
+  install -Dm644 "${srcdir}/nvidia-profiler-device.service" \
+    "${pkgdir}/usr/lib/systemd/system/nvidia-profiler-device.service"
+  install -Dm644 "${srcdir}/nvidia-profiler-sysusers.conf" \
+    "${pkgdir}/usr/lib/sysusers.d/${pkgname}.conf"
+}

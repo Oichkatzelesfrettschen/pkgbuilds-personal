@@ -1,0 +1,34 @@
+post_install() {
+    echo ""
+    echo "==> oichkatzelesfrettschen-zsh-config installed successfully!"
+    echo ""
+    echo "To enable the configuration, add this to your ~/.zshrc:"
+    echo ""
+    echo "    # Source oichkatzelesfrettschen-zsh-config"
+    echo "    [[ -f /usr/share/oichkatzelesfrettschen-zsh-config/zshrc-additions.zsh ]] && source /usr/share/oichkatzelesfrettschen-zsh-config/zshrc-additions.zsh"
+    echo "    [[ -f /usr/share/oichkatzelesfrettschen-zsh-config/completion-config.zsh ]] && source /usr/share/oichkatzelesfrettschen-zsh-config/completion-config.zsh"
+    echo "    [[ -f /usr/share/oichkatzelesfrettschen-zsh-config/fzf-tab-config.zsh ]] && source /usr/share/oichkatzelesfrettschen-zsh-config/fzf-tab-config.zsh"
+    echo ""
+    echo "Then reload your shell:"
+    echo "    exec zsh"
+    echo ""
+    echo "Optional dependencies:"
+    echo "  - fzf-tab-git: Enhanced fuzzy completion"
+    echo "  - eza, bat, git-delta: Rich previews"
+    echo "  - zsh-autosuggestions, zsh-syntax-highlighting"
+    echo ""
+    echo ""
+}
+
+post_upgrade() {
+    post_install
+}
+
+post_remove() {
+    echo ""
+    echo "==> oichkatzelesfrettschen-zsh-config removed"
+    echo ""
+    echo "Remember to remove the source lines from your ~/.zshrc:"
+    echo "    Lines containing /usr/share/oichkatzelesfrettschen-zsh-config/"
+    echo ""
+}

@@ -1,0 +1,4 @@
+post_install() {
+    echo "Enable with: systemctl enable --now case-leds-indigo-dim.service"
+    echo "Color/modes are configurable in /etc/case-leds-indigo-dim.conf"
+}
