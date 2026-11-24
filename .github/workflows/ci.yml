@@ -1,0 +1,45 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  scrub-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Publication scrub
+        run: sh scripts/scrub-check.sh
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Scripts and install files at error severity
+        run: |
+          set -eu
+          git ls-files '*.sh' '*.install' | xargs -r shellcheck -S error -s sh
+  srcinfo:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Tools
+        run: pacman -Syu --noconfirm --needed git
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: .SRCINFO matches each changed PKGBUILD
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -eu
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ "$EVENT" = pull_request ]; then base=origin/$BASE_REF; else base=$BEFORE; fi
+          status=0
+          for d in $(sh scripts/changed-recipes.sh "$base"); do
+            sh scripts/srcinfo-check.sh "$d" || status=1
+          done
+          exit "$status"
