@@ -72,7 +72,7 @@ ncu --version
 ## How
 
 ```sh
-cd ~/Github/PKGBUILDS/pkgbuilds-in-progress/eirikr-nvidia-tuning
+cd eirikr-nvidia-tuning
 makepkg -s
 sudo pacman -U eirikr-nvidia-tuning-*.pkg.tar.zst
 # verify

@@ -64,14 +64,14 @@ Running `make report` generates:
 ## Quick usage
 
 ```bash
-cd ~/Github/PKGBUILDS/local/spline-cp437-limine-font
+cd spline-cp437-limine-font
 make test
 ```
 
 For a fuller local package regression check:
 
 ```bash
-cd ~/Github/PKGBUILDS/local/spline-cp437-limine-font
+cd spline-cp437-limine-font
 make smoke
 ```
 

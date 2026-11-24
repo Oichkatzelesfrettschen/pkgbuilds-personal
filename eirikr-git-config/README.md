@@ -43,7 +43,7 @@ Automatically ignores common files across all repositories:
 ### 1. Install the package
 
 ```bash
-cd ~/Github/PKGBUILDS/pkgbuilds-in-progress/eirikr-git-config
+cd eirikr-git-config
 makepkg -si
 ```
 
