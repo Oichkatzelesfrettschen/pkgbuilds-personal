@@ -1,0 +1,26 @@
+[Unit]
+Description=Retain two versions in the Pacman package cache
+After=local-fs.target
+ConditionPathIsDirectory=/var/cache/pacman/pkg
+
+[Service]
+Type=oneshot
+ExecCondition=/usr/bin/test ! -e /var/lib/pacman/db.lck
+ExecStart=/usr/bin/paccache --remove --keep 2 --nocolor
+Nice=19
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+OOMScoreAdjust=1000
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/cache/pacman/pkg
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+NoNewPrivileges=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @file-system

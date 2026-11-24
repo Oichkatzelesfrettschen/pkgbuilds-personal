@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+storage_root=${CUSTOM_FAST_TEMPORARY_DIRECTORIES_ROOT:-/srv/fasttmp}
+layout_state=${storage_root}/.custom-fast-temporary-directories-layout
+# The package was named private-fast-temporary-directories through 1.0.0, and
+# its marker is live state on the storage root. It is adopted below by one
+# rename on the same filesystem before the marker is validated, so tmp.mount
+# (Requires= this service) keeps mounting across the rename.
+former_layout_state=${storage_root}/.private-fast-temporary-directories-layout
+legacy_directory=${storage_root}/legacy-shared-root
+temporary_directory=${storage_root}/tmp
+persistent_temporary_directory=${storage_root}/var-tmp
+expected_owner_id=0
+state_temporary=
+entry_list=
+
+cleanup_temporary_files() {
+  if [[ -n ${state_temporary} ]]; then
+    rm -f -- "${state_temporary}"
+  fi
+  if [[ -n ${entry_list} ]]; then
+    rm -f -- "${entry_list}"
+  fi
+}
+trap cleanup_temporary_files EXIT
+
+write_layout_state() {
+  local next_state=$1
+
+  state_temporary=$(mktemp "${legacy_directory}/.layout-state.XXXXXX")
+  printf '%s\n' "${next_state}" >"${state_temporary}"
+  chmod 0600 "${state_temporary}"
+  sync -f "${state_temporary}"
+  mv -f -- "${state_temporary}" "${layout_state}"
+  state_temporary=
+  sync -f "${storage_root}"
+}
+
+if [[ ${CUSTOM_FAST_TEMPORARY_DIRECTORIES_TESTING:-0} == 1 ]]; then
+  expected_owner_id=$(id -u)
+fi
+
+if [[ ${storage_root} != /srv/fasttmp &&
+      ${CUSTOM_FAST_TEMPORARY_DIRECTORIES_TESTING:-0} != 1 ]]; then
+  printf 'prepare: alternate storage root requires test mode\n' >&2
+  exit 64
+fi
+
+if ! mountpoint -q -- "${storage_root}" &&
+   [[ ${CUSTOM_FAST_TEMPORARY_DIRECTORIES_TESTING:-0} != 1 ]]; then
+  printf 'prepare: %s is not a mount point\n' "${storage_root}" >&2
+  exit 1
+fi
+
+if [[ ! -e ${layout_state} && ! -L ${layout_state} ]] &&
+   [[ -f ${former_layout_state} && ! -L ${former_layout_state} ]]; then
+  if [[ $(stat -c '%u:%a' "${former_layout_state}") != "${expected_owner_id}:600" ]]; then
+    printf 'prepare: former layout state has unsafe ownership or mode: %s\n' \
+      "${former_layout_state}" >&2
+    exit 1
+  fi
+  mv -- "${former_layout_state}" "${layout_state}"
+  sync -f "${storage_root}"
+fi
+
+if [[ -L ${layout_state} || ! -f ${layout_state} ]]; then
+  printf 'prepare: layout state is absent or is not a regular file: %s\n' \
+    "${layout_state}" >&2
+  exit 1
+fi
+if [[ $(stat -c '%u:%a' "${layout_state}") != "${expected_owner_id}:600" ]]; then
+  printf 'prepare: layout state has unsafe ownership or mode: %s\n' \
+    "${layout_state}" >&2
+  exit 1
+fi
+if [[ -L ${legacy_directory} || ! -d ${legacy_directory} ]]; then
+  printf 'prepare: recovery archive is absent or is not a directory: %s\n' \
+    "${legacy_directory}" >&2
+  exit 1
+fi
+if [[ $(stat -c '%u:%a' "${legacy_directory}") != "${expected_owner_id}:700" ]]; then
+  printf 'prepare: recovery archive has unsafe ownership or mode: %s\n' \
+    "${legacy_directory}" >&2
+  exit 1
+fi
+
+layout_status=$(<"${layout_state}")
+if [[ ${layout_status} != pending &&
+      ${layout_status} != migration-started &&
+      ${layout_status} != legacy-moved &&
+      ${layout_status} != complete ]]; then
+  printf 'prepare: invalid layout state: %s\n' "${layout_status}" >&2
+  exit 1
+fi
+
+if [[ ${layout_status} != complete ]]; then
+  if [[ ${layout_status} != legacy-moved ]]; then
+    write_layout_state migration-started
+
+    entry_list=$(mktemp "${legacy_directory}/.migration-entries.XXXXXX")
+    find -P "${storage_root}" -mindepth 1 -maxdepth 1 \
+      ! -name lost+found \
+      ! -name .custom-fast-temporary-directories-layout \
+      ! -name .private-fast-temporary-directories-layout \
+      ! -name legacy-shared-root \
+      -print0 >"${entry_list}"
+
+    while IFS= read -r -d '' legacy_entry; do
+      legacy_name=${legacy_entry##*/}
+      legacy_destination=${legacy_directory}/${legacy_name}
+
+      if [[ -e ${legacy_destination} || -L ${legacy_destination} ]]; then
+        printf 'prepare: migration destination already exists: %s\n' \
+          "${legacy_destination}" >&2
+        exit 1
+      fi
+
+      mv -- "${legacy_entry}" "${legacy_directory}/"
+    done <"${entry_list}"
+    rm -f -- "${entry_list}"
+    entry_list=
+    write_layout_state legacy-moved
+  fi
+
+  install -d -m1777 -- \
+    "${temporary_directory}" \
+    "${persistent_temporary_directory}"
+  write_layout_state complete
+else
+  install -d -m1777 -- \
+    "${temporary_directory}" \
+    "${persistent_temporary_directory}"
+fi
+
+if [[ ${CUSTOM_FAST_TEMPORARY_DIRECTORIES_TESTING:-0} != 1 ]]; then
+  chown root:root -- "${temporary_directory}" "${persistent_temporary_directory}"
+fi
+chmod 1777 -- "${temporary_directory}" "${persistent_temporary_directory}"

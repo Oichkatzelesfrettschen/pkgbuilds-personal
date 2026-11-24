@@ -1,0 +1,74 @@
+#!/bin/sh
+# Sample the memory and swap state that sizes the swap tiers, one CSV row per
+# interval, until STOPFILE appears. Columns: unix time; MemAvailable, SwapTotal
+# and SwapFree (kB); used kB per swap device in /proc/swaps order at start;
+# zswap pool and the uncompressed bytes it holds (Zswap/Zswapped, kB); memory
+# PSI some/full avg10; the watched slice's memory.current, memory.peak and
+# memory.swap.current (bytes); and the cumulative /proc/vmstat counters
+# zswpin, zswpout, zswpwb, pswpin, pswpout and pgmajfault, whose row-to-row
+# deltas give the sampled window's swap traffic. The QLC tier's column is the
+# one whose peak decides that swapfile's size.
+#
+# Usage: swap-sample OUT.csv [SLICE] [INTERVAL] [STOPFILE]
+#   SLICE defaults to bounded-build.slice, INTERVAL to 15 seconds,
+#   STOPFILE to OUT.csv.stop. OUT.csv and STOPFILE must not exist yet.
+set -eu
+
+out=${1:?output csv}
+slice=${2:-bounded-build.slice}
+interval=${3:-15}
+stop=${4:-$out.stop}
+
+if [ -e "$out" ]; then
+	echo "swap-sample: $out exists; refusing to overwrite a capture" >&2
+	exit 1
+fi
+if [ -e "$stop" ]; then
+	echo "swap-sample: stop file $stop exists; remove it first" >&2
+	exit 1
+fi
+
+# systemd nests a dashed slice name (bounded-build.slice sits under
+# bounded.slice), so the cgroup path comes from systemd, not the name. An
+# inactive slice has no ControlGroup yet, so the path is resolved every row
+# and its columns read empty until the slice exists.
+slice_cg() {
+	p=$(systemctl show -P ControlGroup "$slice")
+	if [ -n "$p" ]; then echo "/sys/fs/cgroup$p"; fi
+}
+cgval() { if [ -n "$1" ] && [ -r "$1/$2" ]; then cat "$1/$2"; fi; }
+
+swapdevs() { awk 'NR > 1 { print $1 }' /proc/swaps; }
+devs=$(swapdevs)
+{
+	printf 'time,mem_available_kb,swap_total_kb,swap_free_kb'
+	for d in $devs; do printf ',used_kb:%s' "$d"; done
+	printf ',zswap_kb,zswapped_kb,psi_some_avg10,psi_full_avg10,slice_current,slice_peak,slice_swap'
+	printf ',zswpin,zswpout,zswpwb,pswpin,pswpout,pgmajfault\n'
+} > "$out"
+
+while [ ! -e "$stop" ]; do
+	# The per-device columns stay fixed to the start set; SwapTotal records
+	# a tier added or removed mid-run, and stderr names the change once.
+	now=$(swapdevs)
+	if [ "$now" != "$devs" ] && [ "$now" != "${warned:-}" ]; then
+		echo "swap-sample: swap device set changed; per-device columns follow the start set" >&2
+		warned=$now
+	fi
+	mem=$(awk '$1 == "MemAvailable:" { a = $2 } $1 == "SwapTotal:" { t = $2 }
+		$1 == "SwapFree:" { s = $2 } $1 == "Zswap:" { z = $2 }
+		$1 == "Zswapped:" { zd = $2 }
+		END { print a "," t "," s ";" z "," zd }' /proc/meminfo)
+	used=""
+	for d in $devs; do
+		used="$used,$(awk -v d="$d" '$1 == d { print $4 }' /proc/swaps)"
+	done
+	psi=$(awk '{ split($2, a, "="); v[$1] = a[2] } END { print v["some"] "," v["full"] }' /proc/pressure/memory)
+	vm=$(awk '$1 ~ /^(zswpin|zswpout|zswpwb|pswpin|pswpout|pgmajfault)$/ { v[$1] = $2 }
+		END { print v["zswpin"] "," v["zswpout"] "," v["zswpwb"] "," v["pswpin"] "," v["pswpout"] "," v["pgmajfault"] }' /proc/vmstat)
+	cg=$(slice_cg)
+	printf '%s,%s%s,%s,%s,%s,%s,%s,%s\n' "$(date +%s)" "${mem%;*}" "$used" "${mem#*;}" \
+		"$psi" "$(cgval "$cg" memory.current)" "$(cgval "$cg" memory.peak)" \
+		"$(cgval "$cg" memory.swap.current)" "$vm" >> "$out"
+	sleep "$interval"
+done

@@ -1,0 +1,30 @@
+# /usr/lib/systemd/system/bounded-build.slice
+#
+# Keys owned: MemoryAccounting, MemoryHigh and MemorySwapMax of this slice.
+# Nesting: systemd places a dashed slice under its prefix, so this slice runs
+# at /bounded.slice/bounded-build.slice; bounded.slice carries no limit, so
+# these are the binding values. ManagedOOMPreference is set per unit by the
+# caller (avoid), not here.
+#
+# System slice for long batch builds that run as system units on behalf of a
+# user (for example: systemd-run --unit=android-build --uid=... \
+#   -p Slice=bounded-build.slice -p ManagedOOMPreference=avoid ...).
+#
+# MemoryHigh=75% throttles and reclaims the build before it pushes the desktop
+# below a quarter of RAM; the build keeps running and swaps its own pages.
+# MemorySwapMax=40G bounds its swap footprint; the measured Android build swap
+# peak is 28 GiB. The kernel frees a swap slot on swap-in once any ancestor
+# cgroup uses at least half of its swap.max (mem_cgroup_swap_full in
+# mm/memcontrol.c), so above 20 GiB a read-hot page stops pinning its disk slot.
+# No MemoryMax: an over-budget build is throttled, not killed by the cgroup OOM
+# killer.
+
+[Unit]
+Description=Bounded long-running build workloads
+Documentation=file:///usr/share/doc/custom-cachyos-system-tuning/README.md
+Before=slices.target
+
+[Slice]
+MemoryAccounting=yes
+MemoryHigh=75%
+MemorySwapMax=40G

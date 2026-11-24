@@ -1,0 +1,27 @@
+# /usr/lib/systemd/user/bounded-workload.slice
+#
+# Keys owned: MemoryAccounting, MemoryHigh, MemoryMax, MemorySwapMax and the
+# ManagedOOMMemoryPressure kill of this user slice.
+# Nesting: the slice sits under user@UID.service beside app.slice, where
+# terminal tab scopes carry their own MemoryMax 16G and MemorySwapMax 2G
+# (the terminal tab-scope OOM drop-in, a separate private package). No ancestor carries a memory limit or a
+# pressure kill: user@.service leaves ManagedOOMMemoryPressure at auto, and
+# the cachyos-settings 80% pressure kill applies to system.slice only. The 70%
+# for 30 s here replaces the systemd default limit of 60% for this slice; oomd
+# compares each monitored cgroup's memory PSI with that cgroup's own limit, so
+# the two settings never act on the same cgroup.
+#
+# MemoryHigh 50% throttles at 31.4 GiB, MemoryMax 60% invokes the memcg OOM
+# killer at 37.6 GiB, both below the 47.0 GiB build budget, and
+# MemorySwapMax 12G keeps a workload below a fifth of the 64 GiB of swap.
+[Unit]
+Description=Bounded interactive build and analysis workloads
+
+[Slice]
+MemoryAccounting=yes
+MemoryHigh=50%
+MemoryMax=60%
+MemorySwapMax=12G
+ManagedOOMMemoryPressure=kill
+ManagedOOMMemoryPressureLimit=70%
+ManagedOOMMemoryPressureDurationSec=30s

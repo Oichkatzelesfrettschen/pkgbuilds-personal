@@ -1,0 +1,94 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+pkgname=custom-fast-temporary-directories
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="Separate disk-backed /tmp and reboot-persistent /var/tmp mounts"
+arch=('any')
+url="https://github.com/oaich/custom-fast-temporary-directories"
+license=('GPL-3.0-only')
+depends=('bash' 'coreutils' 'findutils' 'systemd' 'util-linux')
+# Named private-fast-temporary-directories through 1.0.0. pre_install accepts
+# the already-split live layout, and the preparation script adopts the former
+# layout marker on the storage root.
+provides=('private-fast-temporary-directories')
+conflicts=('private-fast-temporary-directories')
+replaces=('private-fast-temporary-directories')
+backup=(
+  'etc/systemd/system/tmp.mount'
+  'etc/tmpfiles.d/tmp.conf'
+)
+source=(
+  'srv-fasttmp.mount'
+  'custom-fast-temporary-directories-prepare.service'
+  'tmp.mount'
+  'var-tmp.mount'
+  'tmp.conf'
+  'custom-fast-temporary-directories-prepare'
+  'custom-fast-temporary-directories-migrate-config'
+  'custom-fast-temporary-directories-verify'
+  'custom-fast-temporary-directories.install'
+  'README.md'
+  'test-layout.sh'
+  'test-unit-graph.sh'
+  'test-verifier.sh'
+)
+sha256sums=('9a842bc4d06af778b1fdf3c2d377ff2eca0d61a8308978781471c6e3c4e7406d'
+            '840146e4e7b1e2343d54d9b53c8dceb375302929640449f634832096f476fd56'
+            '0ee459be63010aaae9bf993e15d3e7ad12da9fa396e8cbd6763c5d440d3e7e96'
+            '0194bfe3d1d21e58cf6fb2c2c9faa97f60773a7c1cacfd310be51c9c32c3c64f'
+            'bdd75719e39e57a6a99e343301e40cd7edcf3c5583607201372a5de755b3c412'
+            'a2e1f989d159ad94ef5c1623608f772bdc185ddb9e9a94342b2e0ac3bd5582f0'
+            '80fdf2050b99473a9ea27aa7d9cc7876266128b893583218881ec568f2ec4ec2'
+            '13912f05bb1d3b3fcd12c4bf2106406c65eb12fa0b028073b0842f999fcd6a5d'
+            'a2aed6bb71e19d31240459d0332f788da449fa6aeab50b7712d001344bbdb8b7'
+            '04d13ae8f1d70ebcdfa3391a4c8a1b1d2ec6f20c2cda7ea3582aaa27adfea70c'
+            'c067db81da58544b3550a18ccb69e3a488cc97c84bebc1196ac6b5cce28446e7'
+            'cb89fe01091bec9023374b98d25b7e85a7a4ea324ace4929a9885e0f822e612a'
+            'cc2b5c7318ecdd90772887551acd3f2fcb6a3c0f06ad43972e28614fdb2685b0')
+install='custom-fast-temporary-directories.install'
+
+check() {
+  bash -n \
+    custom-fast-temporary-directories-prepare \
+    custom-fast-temporary-directories-migrate-config \
+    custom-fast-temporary-directories-verify \
+    custom-fast-temporary-directories.install \
+    test-layout.sh \
+    test-unit-graph.sh \
+    test-verifier.sh
+
+  shellcheck -S warning \
+    custom-fast-temporary-directories-prepare \
+    custom-fast-temporary-directories-migrate-config \
+    custom-fast-temporary-directories-verify \
+    custom-fast-temporary-directories.install \
+    test-layout.sh \
+    test-unit-graph.sh \
+    test-verifier.sh
+
+  bash test-layout.sh
+  bash test-unit-graph.sh
+  bash test-verifier.sh
+}
+
+package() {
+  install -Dm644 srv-fasttmp.mount \
+    "${pkgdir}/usr/lib/systemd/system/srv-fasttmp.mount"
+  install -Dm644 custom-fast-temporary-directories-prepare.service \
+    "${pkgdir}/usr/lib/systemd/system/custom-fast-temporary-directories-prepare.service"
+  install -Dm644 tmp.mount \
+    "${pkgdir}/etc/systemd/system/tmp.mount"
+  install -Dm644 var-tmp.mount \
+    "${pkgdir}/usr/lib/systemd/system/var-tmp.mount"
+  install -Dm644 tmp.conf \
+    "${pkgdir}/etc/tmpfiles.d/tmp.conf"
+
+  install -Dm755 custom-fast-temporary-directories-prepare \
+    "${pkgdir}/usr/lib/custom-fast-temporary-directories/prepare"
+  install -Dm755 custom-fast-temporary-directories-migrate-config \
+    "${pkgdir}/usr/bin/custom-fast-temporary-directories-migrate-config"
+  install -Dm755 custom-fast-temporary-directories-verify \
+    "${pkgdir}/usr/bin/custom-fast-temporary-directories-verify"
+  install -Dm644 README.md \
+    "${pkgdir}/usr/share/doc/custom-fast-temporary-directories/README.md"
+}

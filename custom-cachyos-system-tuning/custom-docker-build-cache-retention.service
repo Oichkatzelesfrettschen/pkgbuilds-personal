@@ -1,0 +1,23 @@
+[Unit]
+Description=Bound private Docker builder cache at 20 GiB
+After=docker.service
+ConditionPathExists=/usr/bin/docker
+ConditionPathIsSocket=/run/docker.sock
+
+[Service]
+Type=oneshot
+StateDirectory=custom-docker-build-cache-retention
+Environment=DOCKER_CONFIG=/var/lib/custom-docker-build-cache-retention
+ExecCondition=/usr/bin/test -x /usr/bin/docker
+ExecStart=/usr/bin/docker buildx prune --all --force --max-used-space 20GB --reserved-space 10GB
+Nice=19
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+OOMScoreAdjust=1000
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true

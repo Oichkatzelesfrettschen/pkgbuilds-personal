@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+expected_uuid=f80f3ba8-49f9-46ae-9101-c8638f017a64
+failure_count=0
+
+check_equal() {
+  local description=$1
+  local expected=$2
+  local actual=$3
+
+  if [[ ${actual} == "${expected}" ]]; then
+    printf 'PASS: %s: %s\n' "${description}" "${actual}"
+  else
+    printf 'FAIL: %s: expected %s, got %s\n' \
+      "${description}" "${expected}" "${actual}" >&2
+    (( failure_count += 1 ))
+  fi
+}
+
+check_different() {
+  local description=$1
+  local first_value=$2
+  local second_value=$3
+
+  if [[ ${first_value} != "${second_value}" ]]; then
+    printf 'PASS: %s: %s != %s\n' \
+      "${description}" "${first_value}" "${second_value}"
+  else
+    printf 'FAIL: %s: both values are %s\n' \
+      "${description}" "${first_value}" >&2
+    (( failure_count += 1 ))
+  fi
+}
+
+probe_equal() {
+  local description=$1
+  local expected=$2
+  shift 2
+  local actual
+
+  if ! actual=$("$@" 2>/dev/null); then
+    printf 'FAIL: %s: probe command failed\n' "${description}" >&2
+    (( failure_count += 1 ))
+    return
+  fi
+  check_equal "${description}" "${expected}" "${actual}"
+}
+
+probe_equal '/srv/fasttmp UUID' "${expected_uuid}" \
+  findmnt -no UUID -T /srv/fasttmp
+probe_equal '/tmp UUID' "${expected_uuid}" findmnt -no UUID -T /tmp
+probe_equal '/tmp filesystem root' '/tmp' findmnt -no FSROOT -T /tmp
+probe_equal '/var/tmp UUID' "${expected_uuid}" findmnt -no UUID -T /var/tmp
+probe_equal '/var/tmp filesystem root' '/var-tmp' findmnt -no FSROOT -T /var/tmp
+probe_equal '/tmp mode and owner' '1777 root:root' stat -c '%a %U:%G' /tmp
+probe_equal '/var/tmp mode and owner' '1777 root:root' stat -c '%a %U:%G' /var/tmp
+
+tmp_identity=$(stat -c '%D:%i' /tmp 2>/dev/null || true)
+var_tmp_identity=$(stat -c '%D:%i' /var/tmp 2>/dev/null || true)
+if [[ -n ${tmp_identity} && -n ${var_tmp_identity} ]]; then
+  check_different '/tmp and /var/tmp inode identity' \
+    "${tmp_identity}" "${var_tmp_identity}"
+else
+  printf 'FAIL: /tmp and /var/tmp inode identity probe failed\n' >&2
+  (( failure_count += 1 ))
+fi
+
+probe_equal 'layout state' 'complete' cat \
+  /srv/fasttmp/.custom-fast-temporary-directories-layout
+
+for required_unit in \
+  srv-fasttmp.mount \
+  custom-fast-temporary-directories-prepare.service \
+  tmp.mount \
+  var-tmp.mount; do
+  if systemctl is-active --quiet "${required_unit}"; then
+    printf 'PASS: unit is active: %s\n' "${required_unit}"
+  else
+    printf 'FAIL: unit is inactive: %s\n' "${required_unit}" >&2
+    (( failure_count += 1 ))
+  fi
+done
+
+if ! tmpfiles_configuration=$(systemd-tmpfiles --cat-config 2>/dev/null); then
+  printf 'FAIL: effective tmpfiles policy probe failed\n' >&2
+  (( failure_count += 1 ))
+else
+  if grep -Fxq 'D! /tmp 1777 root root -' <<<"${tmpfiles_configuration}"; then
+    printf 'PASS: effective tmpfiles policy has the /tmp boot wipe\n'
+  else
+    printf 'FAIL: effective tmpfiles policy lacks the /tmp boot wipe\n' >&2
+    (( failure_count += 1 ))
+  fi
+  if grep -Fxq 'q  /var/tmp 1777 root root 2d' <<<"${tmpfiles_configuration}"; then
+    printf 'PASS: effective tmpfiles policy has the /var/tmp retention rule\n'
+  else
+    printf 'FAIL: effective tmpfiles policy lacks the /var/tmp retention rule\n' >&2
+    (( failure_count += 1 ))
+  fi
+fi
+
+if (( failure_count != 0 )); then
+  printf 'verify: %d checks failed\n' "${failure_count}" >&2
+  exit 1
+fi
+
+printf 'verify: all checks passed\n'

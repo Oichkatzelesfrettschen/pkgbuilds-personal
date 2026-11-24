@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  printf '%s\n' \
+    'usage: storage-inventory OUTPUT_FILE DEPTH PATH [PATH ...]' \
+    '' \
+    'Runs one low-priority, filesystem-bounded du inventory at a time.' \
+    'OUTPUT_FILE receives byte counts sorted from smallest to largest.' >&2
+}
+
+if (( $# < 3 )); then
+  usage
+  exit 2
+fi
+
+output_file=$1
+maximum_depth=$2
+shift 2
+
+if [[ ! ${maximum_depth} =~ ^[0-9]+$ ]]; then
+  printf 'storage-inventory: DEPTH must be a non-negative integer\n' >&2
+  exit 2
+fi
+
+output_parent=$(dirname -- "${output_file}")
+mkdir -p -- "${output_parent}"
+
+state_directory=${XDG_STATE_HOME:-${HOME}/.local/state}/storage-inventory
+mkdir -p -- "${state_directory}"
+lock_file=${state_directory}/inventory.lock
+exec 9>"${lock_file}"
+if ! flock -n 9; then
+  printf 'storage-inventory: another inventory is already running\n' >&2
+  exit 75
+fi
+
+temporary_output=$(mktemp "${output_parent}/.storage-inventory.XXXXXX")
+temporary_errors=${temporary_output}.err
+cleanup() {
+  /usr/bin/rm -f -- "${temporary_output}" "${temporary_errors}"
+}
+trap cleanup EXIT HUP INT TERM
+
+inventory_command=(
+  /usr/bin/du
+  -x
+  -B1
+  "--max-depth=${maximum_depth}"
+  --
+  "$@"
+)
+
+set +e
+systemd-run --user --scope --quiet --collect \
+  --unit=storage-inventory \
+  --slice=bounded-workload.slice \
+  --description='Single-instance bounded storage inventory' \
+  -p MemoryAccounting=yes \
+  -p MemoryHigh=2G \
+  -p MemoryMax=3G \
+  -p MemorySwapMax=2G \
+  -p OOMPolicy=kill \
+  -p TasksMax=32 \
+  -p CPUWeight=10 \
+  -p IOWeight=10 \
+  -- nice -n 15 ionice -c 3 "${inventory_command[@]}" \
+  >"${temporary_output}" 2>"${temporary_errors}"
+inventory_status=$?
+set -e
+
+LC_ALL=C sort -n -- "${temporary_output}" >"${output_file}"
+if [[ -s ${temporary_errors} ]]; then
+  cp -- "${temporary_errors}" "${output_file}.err"
+else
+  /usr/bin/rm -f -- "${output_file}.err"
+fi
+
+if (( inventory_status != 0 )); then
+  printf 'storage-inventory: du exited with status %d; partial results retained in %s\n' \
+    "${inventory_status}" "${output_file}" >&2
+  exit "${inventory_status}"
+fi
+
+printf 'storage-inventory: wrote %s\n' "${output_file}"
