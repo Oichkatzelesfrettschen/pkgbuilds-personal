@@ -1,0 +1,16 @@
+[Unit]
+Description=Disk-backed volatile temporary directory
+Documentation=man:file-hierarchy(7)
+Documentation=file:/usr/share/doc/custom-fast-temporary-directories/README.md
+DefaultDependencies=no
+Requires=custom-fast-temporary-directories-prepare.service var-tmp.mount
+After=custom-fast-temporary-directories-prepare.service
+Before=local-fs.target umount.target
+Conflicts=umount.target
+
+[Mount]
+What=/srv/fasttmp/tmp
+Where=/tmp
+Type=none
+Options=bind,nosuid,nodev
+DirectoryMode=1777

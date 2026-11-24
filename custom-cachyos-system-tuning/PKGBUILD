@@ -1,0 +1,226 @@
+# Maintainer: Oichkatzelesfrettschen <151315375+Oichkatzelesfrettschen@users.noreply.github.com>
+pkgname=custom-cachyos-system-tuning
+pkgver=1.12.0
+pkgrel=1
+pkgdesc="Workstation pressure policy: bounded memory, storage inventory, scratch, and derived caches"
+arch=('any')
+url="https://github.com/oaich/custom-cachyos-system-tuning"
+license=('GPL-3.0-only')
+# Every dependency is consumed by a script or unit rather than linked, so
+# namcap's ELF-linkage dependency check reports each one as "may not be
+# needed". Consumers: bash (bounded-workload, storage-inventory), systemd (units,
+# oomd drop-ins, zswap tmpfiles), util-linux (swapon, mkswap, fallocate, blkid
+# in ensure-fast-swapfile and the .install), procps-ng (sysctl in the .install),
+# zram-generator (zram-generator.conf, which disables its device),
+# cachyos-settings (the baseline these drop-ins override), pacman-contrib
+# (paccache in the retention service).
+depends=('bash' 'systemd' 'util-linux' 'procps-ng' 'zram-generator' 'cachyos-settings' 'pacman-contrib')
+optdepends=('docker: daily bounded Docker builder-cache retention'
+            'lm_sensors: applies the sensors.d jc42 limits at boot and on install')
+# The package was named private-cachyos-system-tuning through 1.11.0. Its
+# removal scriptlet runs before this package installs (libalpm sync.c removes
+# conflicting and replaced packages first); the .install records what it does
+# and how post_install restores the state it changes.
+provides=('eirikr-system-tuning' 'private-cachyos-system-tuning')
+conflicts=('eirikr-system-tuning' 'private-cachyos-system-tuning')
+replaces=('eirikr-system-tuning' 'private-cachyos-system-tuning')
+
+backup=(
+  'etc/sysctl.d/99-swap-reclaim.conf'
+  'etc/sysctl.d/99-vfs-cache-pressure.conf'
+  'etc/sysctl.d/99-free-memory-reserve.conf'
+  'etc/sysctl.d/99-max-map-count.conf'
+  'etc/systemd/zram-generator.conf'
+  'etc/sysctl.d/99-inotify-limits.conf'
+  'etc/sensors.d/tuf-b550-nct6798.conf'
+)
+source=(
+  '99-swap-reclaim.conf'
+  '99-vfs-cache-pressure.conf'
+  '99-free-memory-reserve.conf'
+  '99-max-map-count.conf'
+  'zram-generator.conf'
+  'oomd-swap-limit.conf'
+  'managed-oom-swap.conf'
+  'bounded-workload.slice'
+  'bounded-workload'
+  'storage-inventory'
+  'srv-scratch.conf'
+  'custom-paccache-retention.service'
+  'custom-paccache-retention.timer'
+  'custom-docker-build-cache-retention.service'
+  'custom-docker-build-cache-retention.timer'
+  'journald-retention.conf'
+  'coredump-limits.conf'
+  'logind-no-idle-suspend.conf'
+  'sleep-no-sleep.conf'
+  'ensure-fast-swapfile'
+  'custom-fast-swapfile.service'
+  'srv-fasttmp-swapfile.swap'
+  'zswap.conf'
+  'bounded-build.slice'
+  'README.md'
+  'SYSTEM.md'
+  '99-inotify-limits.conf'
+  'tuf-b550-nct6798.conf'
+  'warp-svc-log-rate.conf'
+  'vmware-usbarbitrator-log-rate.conf'
+  'ksmd-off.conf'
+  'memory-ksm-off.conf'
+)
+sha256sums=('14d4a8e637c9bd9aa1ac2be02ad012fcdae180cddc9f22092739f000d3332621'
+            'c996c9df3b560f2382a0d683ef605222b7acf18be60473dd44dd4c379a2c2faa'
+            'f95e3225b68bedeeeb0eb4be031931c1e6a9099331ebafb31867de273da2aba1'
+            '976f6e4041bfcb1290df2928b5e06ec72fc0bb0bca05f4b58ab07af0a72ad0fb'
+            'f6dfce5d5284edaf3527a795e3fbb7ec444429e642116a4311390d4f2055535c'
+            '26c3be78af8e1692642dd88395437bdc942cd41f3ebc23487709744b16a0db00'
+            '5cd92505053a61d17de05296b6c516814ab69db7936527ee62998117db47f6f4'
+            '08c0e1a84650202edc53b771c4fa27d529c278e2815f258f18dd83663513fc03'
+            '610e33f2d421f899b50ad89b4c7343cc5ed9884ce65bdb27cb8e7959140be1a8'
+            'b108c10b66ac5dd9890b174c77500aa075b36ff4b52e721bb4e13315d5ec0cdb'
+            '5ecdbca1c5940790f213980dba0d1d5eb106d0a600a501d0bf28be519e9cde72'
+            'e150b75571988c0a5ddeb8c12ceef98a7a0f325d9b4b0f66d47bbd5ece0aeb41'
+            '1e240ab25624418245275ed1774e38e78e20a27369d6b4fd5041b3588c6bab49'
+            'b8954f9d5cdb163a8e43d26bed8bb9c698f5beb6e04ff0492d6d05f5b3cae994'
+            'ce6a91d8ff30bcc7925164313c30902028debf90ca810a9badb156b02c56f101'
+            '4916c73c01eee8d1627a4bc08602ef5aca04f57596b87362e4d54f41cc19e028'
+            'efcf565895332bf829656b3628f74c262803bc6106c38133e0866dd9f067eaa2'
+            '7492739799b4608f5096e9d8a3ed6712a49d77d7d1ebc07510fb25797ec7e7e5'
+            'df13d625e217545be47b3b8dbabcb8c08e8bcaa11337ce01fea00a2f16ac060d'
+            'db14c7a2ad01236f06845c4b4e51fabfb02183ff02fa8bc1bc325f66f2032814'
+            'f662d3d46e206993cb69c076eb095815a97b5b0ed2d664306b0aab7b9ef03c5b'
+            'e8d4e485ef8ac28dcb2d5ec9532255ab26188d1c9386d73c46346fde3b13901c'
+            'b68eda4e325f9dd5d891c916391b750276381e95455b2d6db489f40e6c179b43'
+            '4ddb7e6b8f1cbd9610e5e93bacc140a518caa2c17733c2d8d1ff3f200719eedd'
+            'e3407a40742c549ec6c2a65a484e0dabb543c64c0a2ef55713260e640296e9b1'
+            '558aa58d4e3649d4657111bb7f50ad4d341cb9a4f2339779e0101de6fe6c927c'
+            'b00418ee72dea063ff98e23d9cdf3639e898f7dd9435a2d77aa0258b4213a9c4'
+            '3f573bacb837a159afa682bceb5586da7039aeb5dead20438a3e34d294ff0a49'
+            '04ec4cf1ee4c9297d210282f568372a70105bb2d6865afb53edbae76ecbf81ff'
+            'c84dabd2169c7e14533a907980846313b43a7c004b54c55a9002a7b8c03e9dc0'
+            'fb676420e664070e4be73ad15e405710c3b2d83481e46d3ca61659e5a4a70f1e'
+            'a04fb0ea9611367b6a15e69ba9d5f64adf637a3989bdde1997e883b2090cb186')
+install='custom-cachyos-system-tuning.install'
+
+package() {
+  # ===== sysctl.d: one file per concern =====
+  # 99-swap-reclaim.conf: swappiness 150 and page-cluster 0 (zswap in front of
+  # TLC swap, QLC filesystem). 99-vfs-cache-pressure.conf: 100 over the CachyOS
+  # 50. 99-free-memory-reserve.conf: free reserve, watermark spacing and boost,
+  # proactive compaction. Each header names its keys and the files it overrides.
+  for _f in 99-swap-reclaim.conf 99-vfs-cache-pressure.conf 99-free-memory-reserve.conf; do
+    install -Dm644 "${srcdir}/${_f}" "${pkgdir}/etc/sysctl.d/${_f}"
+  done
+
+  # ===== sysctl.d: mmap region ceiling =====
+  # 99-max-map-count.conf sorts after elasticsearch's 60-elasticsearch.conf,
+  # which lowers the Arch 10-arch.conf value of 1048576 to 262144.
+  install -Dm644 "${srcdir}/99-max-map-count.conf" "${pkgdir}/etc/sysctl.d/99-max-map-count.conf"
+
+  # ===== compressed tier: zswap in front of the disk swapfiles =====
+  # zram-generator.conf declares no device, which shadows the cachyos-settings
+  # zram0 definition; the tmpfiles file enables zswap at boot. zram at a higher
+  # priority than disk swap keeps whichever pages reached it first, so hot pages
+  # spilled to the QLC disk while cold desktop pages held zram. zswap writes its
+  # coldest entries back to disk and keeps recent pages compressed in RAM. Both
+  # changes apply at the next boot.
+  install -Dm644 "${srcdir}/zram-generator.conf" "${pkgdir}/etc/systemd/zram-generator.conf"
+  install -Dm644 "${srcdir}/zswap.conf" \
+    "${pkgdir}/usr/lib/tmpfiles.d/${pkgname}-zswap.conf"
+
+  # ===== the 980 PRO swap tier =====
+  # The 980 PRO swapfile is the primary disk tier behind zswap. The root disk is
+  # a DRAM-less QLC drive on PCIe 3.0; the 980 PRO is TLC with DRAM on PCIe 4.0
+  # and carries the fast partition at /srv/fasttmp. The swapfile lives on the
+  # partition root, outside the /tmp bind, so no tmpfiles cleanup reaches it. The oneshot creates the file only when it is missing;
+  # the static swap.target.wants link enables the tier on install.
+  install -Dm755 "${srcdir}/ensure-fast-swapfile" \
+    "${pkgdir}/usr/lib/${pkgname}/ensure-fast-swapfile"
+  install -Dm644 "${srcdir}/custom-fast-swapfile.service" \
+    "${pkgdir}/usr/lib/systemd/system/custom-fast-swapfile.service"
+  install -Dm644 "${srcdir}/srv-fasttmp-swapfile.swap" \
+    "${pkgdir}/usr/lib/systemd/system/srv-fasttmp-swapfile.swap"
+  install -d "${pkgdir}/usr/lib/systemd/system/swap.target.wants"
+  ln -s ../srv-fasttmp-swapfile.swap \
+    "${pkgdir}/usr/lib/systemd/system/swap.target.wants/srv-fasttmp-swapfile.swap"
+
+  # ===== systemd-oomd: swap backstop near exhaustion =====
+  # Swap pressure is bounded by per-workload budgets (the two bounded slices);
+  # oomd's swap guard is a 90% backstop. The -.slice drop-in opts the cgroup
+  # tree into it.
+  install -Dm644 "${srcdir}/oomd-swap-limit.conf" \
+    "${pkgdir}/usr/lib/systemd/oomd.conf.d/95-custom-cachyos-system-tuning.conf"
+  install -Dm644 "${srcdir}/managed-oom-swap.conf" \
+    "${pkgdir}/usr/lib/systemd/system/-.slice.d/10-managed-oom-swap.conf"
+
+  # ===== system batch builds: a budget instead of an oomd exemption =====
+  install -Dm644 "${srcdir}/bounded-build.slice" \
+    "${pkgdir}/usr/lib/systemd/system/bounded-build.slice"
+
+  # ===== user workloads: separate heavy jobs from terminal scopes =====
+  install -Dm644 "${srcdir}/bounded-workload.slice" \
+    "${pkgdir}/usr/lib/systemd/user/bounded-workload.slice"
+  install -Dm755 "${srcdir}/bounded-workload" \
+    "${pkgdir}/usr/bin/bounded-workload"
+  install -Dm755 "${srcdir}/storage-inventory" \
+    "${pkgdir}/usr/bin/storage-inventory"
+
+  # ===== scratch: explicit lifecycle for service-data workspace =====
+  install -Dm644 "${srcdir}/srv-scratch.conf" \
+    "${pkgdir}/usr/lib/tmpfiles.d/srv-scratch.conf"
+
+  # ===== package cache: retain rollback coverage without unbounded growth =====
+  install -Dm644 "${srcdir}/custom-paccache-retention.service" \
+    "${pkgdir}/usr/lib/systemd/system/custom-paccache-retention.service"
+  install -Dm644 "${srcdir}/custom-paccache-retention.timer" \
+    "${pkgdir}/usr/lib/systemd/system/custom-paccache-retention.timer"
+
+  # ===== container cache: retain images, containers, and volumes =====
+  install -Dm644 "${srcdir}/custom-docker-build-cache-retention.service" \
+    "${pkgdir}/usr/lib/systemd/system/custom-docker-build-cache-retention.service"
+  install -Dm644 "${srcdir}/custom-docker-build-cache-retention.timer" \
+    "${pkgdir}/usr/lib/systemd/system/custom-docker-build-cache-retention.timer"
+
+  # ===== journald, coredump, logind and sleep: the daemon-config half =====
+  # These four were hand-written into /etc/systemd/*.conf.d and owned by no
+  # package. They are this package's policy rather than the operator's, so
+  # they install under /usr/lib where an operator drop-in in /etc still wins,
+  # and removing the package takes them with it.
+  install -Dm644 "${srcdir}/journald-retention.conf" \
+    "${pkgdir}/usr/lib/systemd/journald.conf.d/50-${pkgname}.conf"
+  install -Dm644 "${srcdir}/coredump-limits.conf" \
+    "${pkgdir}/usr/lib/systemd/coredump.conf.d/50-${pkgname}.conf"
+  install -Dm644 "${srcdir}/logind-no-idle-suspend.conf" \
+    "${pkgdir}/usr/lib/systemd/logind.conf.d/90-${pkgname}.conf"
+  install -Dm644 "${srcdir}/sleep-no-sleep.conf" \
+    "${pkgdir}/usr/lib/systemd/sleep.conf.d/90-${pkgname}.conf"
+
+  # ===== journald: per-unit rate limits for the two noisiest system units =====
+  # Only the system manager exports LogRateLimit* and LogLevelMax to journald
+  # (unit_export_state_files in src/core/unit.c returns early for a user
+  # manager), so a user-unit drop-in would be inert; user units are an operator
+  # decision recorded in SYSTEM.md.
+  install -Dm644 "${srcdir}/warp-svc-log-rate.conf" \
+    "${pkgdir}/usr/lib/systemd/system/warp-svc.service.d/50-${pkgname}.conf"
+  install -Dm644 "${srcdir}/vmware-usbarbitrator-log-rate.conf" \
+    "${pkgdir}/usr/lib/systemd/system/vmware-usbarbitrator.service.d/50-${pkgname}.conf"
+
+  # ===== KSM off: both layers cachyos-ksm-settings enables =====
+  install -Dm644 "${srcdir}/ksmd-off.conf" \
+    "${pkgdir}/usr/lib/systemd/system/ksmd.service.d/90-${pkgname}.conf"
+  for _unit in user@.service gdm.service getty@.service; do
+    install -Dm644 "${srcdir}/memory-ksm-off.conf" \
+      "${pkgdir}/usr/lib/systemd/system/${_unit}.d/90-${pkgname}.conf"
+  done
+
+  # ===== inotify ceilings: one owned file replaces three unowned ones =====
+  install -Dm644 "${srcdir}/99-inotify-limits.conf" "${pkgdir}/etc/sysctl.d/99-inotify-limits.conf"
+
+  # ===== board sensors: NCT6798D labels and DDR4 jc42 limits =====
+  # lm_sensors.service runs 'sensors -s' at boot, which writes the jc42 set lines.
+  install -Dm644 "${srcdir}/tuf-b550-nct6798.conf" "${pkgdir}/etc/sensors.d/tuf-b550-nct6798.conf"
+
+  # ===== documentation referenced by the units' Documentation= =====
+  install -Dm644 "${srcdir}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+  install -Dm644 "${srcdir}/SYSTEM.md" "${pkgdir}/usr/share/doc/${pkgname}/SYSTEM.md"
+}

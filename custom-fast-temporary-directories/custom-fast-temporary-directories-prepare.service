@@ -1,0 +1,13 @@
+[Unit]
+Description=Prepare separate fast temporary directories
+Documentation=file:/usr/share/doc/custom-fast-temporary-directories/README.md
+DefaultDependencies=no
+Requires=srv-fasttmp.mount
+After=srv-fasttmp.mount
+Before=tmp.mount var-tmp.mount local-fs.target umount.target
+Conflicts=umount.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/custom-fast-temporary-directories/prepare
+RemainAfterExit=yes

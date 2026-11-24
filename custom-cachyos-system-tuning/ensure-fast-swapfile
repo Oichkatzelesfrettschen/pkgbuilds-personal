@@ -1,0 +1,25 @@
+#!/bin/sh
+# Create the Samsung 980 PRO swapfile when it is missing, so the priority-50
+# swap unit has a swap area after a fresh or reformatted fast partition. An
+# existing swap area is left untouched: mkswap over an active swapfile would
+# destroy the pages swapped into it. A path holding anything other than a swap
+# area is refused rather than overwritten.
+set -eu
+swapfile=/srv/fasttmp/swapfile
+size=48G
+label=swap-980pro
+if [ -e "$swapfile" ]; then
+    if [ "$(blkid -p -o value -s TYPE "$swapfile" 2>/dev/null)" = swap ]; then
+        exit 0
+    fi
+    echo "ensure-fast-swapfile: $swapfile exists and is not a swap area; refusing to overwrite" >&2
+    exit 1
+fi
+staging=$swapfile.new
+trap 'rm -f "$staging"' EXIT
+rm -f "$staging"
+fallocate -l "$size" "$staging"
+chmod 600 "$staging"
+mkswap -L "$label" "$staging" >/dev/null
+mv "$staging" "$swapfile"
+trap - EXIT

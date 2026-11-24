@@ -1,0 +1,96 @@
+# shellcheck shell=sh
+
+_split_layout_is_live() {
+    # True when the split layout is already mounted and its marker (under this
+    # name or the former private-fast-temporary-directories name) reads
+    # complete: the state the rename from private-fast-temporary-directories
+    # 1.0.0 finds. The old package is already gone from the local database when
+    # this runs, so the check reads the mounts and the marker, not pacman.
+    expected_uuid=f80f3ba8-49f9-46ae-9101-c8638f017a64
+    [ "$(findmnt -no UUID -T /tmp 2>/dev/null)" = "${expected_uuid}" ] || return 1
+    [ "$(findmnt -no FSROOT -T /tmp 2>/dev/null)" = /tmp ] || return 1
+    [ "$(findmnt -no FSROOT -T /var/tmp 2>/dev/null)" = /var-tmp ] || return 1
+    for marker in /srv/fasttmp/.custom-fast-temporary-directories-layout \
+        /srv/fasttmp/.private-fast-temporary-directories-layout; do
+        if [ -f "${marker}" ] && [ ! -L "${marker}" ] &&
+            [ "$(cat "${marker}")" = complete ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+pre_install() {
+    if _split_layout_is_live; then
+        return 0
+    fi
+
+    expected_uuid=f80f3ba8-49f9-46ae-9101-c8638f017a64
+    tmp_identity=$(stat -c '%d:%i' /tmp) || return 1
+    var_tmp_identity=$(stat -c '%d:%i' /var/tmp) || return 1
+    tmp_uuid=$(findmnt -no UUID -T /tmp) || return 1
+    tmp_filesystem_root=$(findmnt -no FSROOT -T /tmp) || return 1
+
+    if [ "${tmp_identity}" != "${var_tmp_identity}" ] ||
+        [ "${tmp_uuid}" != "${expected_uuid}" ] ||
+        [ "${tmp_filesystem_root}" != / ]; then
+        printf '%s\n' \
+            'custom-fast-temporary-directories: the live legacy layout does not match; refusing first-install migration' >&2
+        return 1
+    fi
+
+    if [ -L /tmp/.custom-fast-temporary-directories-layout ] ||
+        [ ! -f /tmp/.custom-fast-temporary-directories-layout ] ||
+        [ "$(stat -c '%u:%a' /tmp/.custom-fast-temporary-directories-layout)" != 0:600 ] ||
+        [ "$(cat /tmp/.custom-fast-temporary-directories-layout)" != pending ] ||
+        [ -L /tmp/legacy-shared-root ] ||
+        [ ! -d /tmp/legacy-shared-root ] ||
+        [ "$(stat -c '%u:%a' /tmp/legacy-shared-root)" != 0:700 ]; then
+        printf '%s\n' \
+            'custom-fast-temporary-directories: migration command did not reserve safe first-boot paths' >&2
+        return 1
+    fi
+}
+
+post_install() {
+    systemctl daemon-reload >/dev/null 2>&1 || true
+
+    if _split_layout_is_live; then
+        # Rename from private-fast-temporary-directories: the mounts stay as
+        # they are (systemd keeps active mount units whose files were replaced).
+        # Starting the renamed preparation oneshot adopts the former marker and
+        # re-asserts the two directory modes; it starts no mount and stops none.
+        # The former oneshot stays loaded as not-found until reboot and is not
+        # stopped.
+        systemctl start custom-fast-temporary-directories-prepare.service >/dev/null 2>&1 || true
+        cat <<'EOF'
+==> custom-fast-temporary-directories replaced private-fast-temporary-directories.
+==> /tmp and /var/tmp stay mounted; run custom-fast-temporary-directories-verify.
+EOF
+        return 0
+    fi
+
+    cat <<'EOF'
+==> custom-fast-temporary-directories installed.
+==> The mount topology changes at the next reboot. The preparation service
+==> moves the former shared-root contents into the root-only recovery directory
+==> /srv/fasttmp/legacy-shared-root before exposing separate directories.
+==> Run custom-fast-temporary-directories-verify after reboot.
+EOF
+}
+
+post_upgrade() {
+    post_install "$1"
+}
+
+post_remove() {
+    systemctl daemon-reload >/dev/null 2>&1 || true
+
+    cat <<'EOF'
+==> custom-fast-temporary-directories removed.
+==> The one-time fstab migration and the data under /srv/fasttmp remain.
+==> The systemd defaults provide tmpfs-backed /tmp and root-backed /var/tmp at
+==> the next boot. Restore the recorded fstab backup only to return deliberately
+==> to the former shared-root layout.
+EOF
+}

@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -eq 0 ]; then
+    printf 'usage: bounded-workload COMMAND [ARGUMENT ...]\n' >&2
+    exit 64
+fi
+
+# Prefer the explicitly bounded workload over desktop applications if the
+# kernel reaches global OOM before the slice limit can contain the workload.
+printf '%s\n' 500 > /proc/self/oom_score_adj
+
+exec systemd-run \
+    --user \
+    --scope \
+    --collect \
+    --same-dir \
+    --slice=bounded-workload.slice \
+    --description="Bounded workload: $1" \
+    -- "$@"

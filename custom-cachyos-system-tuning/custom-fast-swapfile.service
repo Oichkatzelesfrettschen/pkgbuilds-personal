@@ -1,0 +1,12 @@
+[Unit]
+Description=Create the Samsung 980 PRO swapfile when it is missing
+Documentation=file:///usr/share/doc/custom-cachyos-system-tuning/README.md
+DefaultDependencies=no
+RequiresMountsFor=/srv/fasttmp
+ConditionPathIsMountPoint=/srv/fasttmp
+Before=srv-fasttmp-swapfile.swap
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/custom-cachyos-system-tuning/ensure-fast-swapfile

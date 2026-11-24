@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fstab_path=${CUSTOM_FAST_TEMPORARY_DIRECTORIES_FSTAB:-/etc/fstab}
+tmpfiles_override=${CUSTOM_FAST_TEMPORARY_DIRECTORIES_TMPFILES_OVERRIDE:-/etc/tmpfiles.d/tmp.conf}
+live_tmp=${CUSTOM_FAST_TEMPORARY_DIRECTORIES_LIVE_TMP:-/tmp}
+expected_uuid=f80f3ba8-49f9-46ae-9101-c8638f017a64
+marker='# custom-fast-temporary-directories: retired shared-root layout'
+apply=0
+expected_owner_id=0
+
+if [[ ${CUSTOM_FAST_TEMPORARY_DIRECTORIES_TESTING:-0} == 1 ]]; then
+  expected_owner_id=$(id -u)
+fi
+
+reserve_first_boot_paths() {
+  local layout_state=${live_tmp}/.custom-fast-temporary-directories-layout
+  local legacy_directory=${live_tmp}/legacy-shared-root
+  local state_temporary
+
+  if [[ ${CUSTOM_FAST_TEMPORARY_DIRECTORIES_TESTING:-0} != 1 ]]; then
+    if [[ $(stat -c '%d:%i' /tmp) != $(stat -c '%d:%i' /var/tmp) ||
+          $(findmnt -no UUID -T /tmp) != "${expected_uuid}" ||
+          $(findmnt -no FSROOT -T /tmp) != / ]]; then
+      printf 'migrate-config: live shared-root layout does not match the expected mount\n' >&2
+      return 1
+    fi
+  fi
+
+  if [[ -L ${legacy_directory} ]]; then
+    printf 'migrate-config: recovery archive path is a symlink: %s\n' \
+      "${legacy_directory}" >&2
+    return 1
+  fi
+  if [[ ! -e ${legacy_directory} ]]; then
+    mkdir -m0700 -- "${legacy_directory}"
+    if [[ ${CUSTOM_FAST_TEMPORARY_DIRECTORIES_TESTING:-0} == 1 &&
+          ${CUSTOM_FAST_TEMPORARY_DIRECTORIES_FAIL_AFTER_RESERVE_DIRECTORY:-0} == 1 ]]; then
+      printf 'migrate-config: injected interruption after recovery archive creation\n' >&2
+      return 75
+    fi
+  fi
+  if [[ ! -d ${legacy_directory} ||
+        $(stat -c '%u:%a' "${legacy_directory}") != "${expected_owner_id}:700" ]]; then
+    printf 'migrate-config: recovery archive has unsafe type, ownership, or mode\n' >&2
+    return 1
+  fi
+
+  if [[ -L ${layout_state} ]]; then
+    printf 'migrate-config: layout state path is a symlink: %s\n' \
+      "${layout_state}" >&2
+    return 1
+  fi
+  if [[ ! -e ${layout_state} ]]; then
+    state_temporary=$(mktemp "${live_tmp}/.layout-state.XXXXXX")
+    printf '%s\n' pending >"${state_temporary}"
+    chmod 0600 "${state_temporary}"
+    sync -f "${state_temporary}"
+    mv -- "${state_temporary}" "${layout_state}"
+    sync -f "${live_tmp}"
+  fi
+  if [[ ! -f ${layout_state} ||
+        $(stat -c '%u:%a' "${layout_state}") != "${expected_owner_id}:600" ||
+        $(<"${layout_state}") != pending ]]; then
+    printf 'migrate-config: layout state has unsafe type, ownership, mode, or content\n' >&2
+    return 1
+  fi
+
+  printf 'migrate-config: first-boot migration paths are reserved\n'
+}
+
+usage() {
+  printf 'usage: custom-fast-temporary-directories-migrate-config [--check|--apply]\n'
+}
+
+case ${1:---check} in
+  --check)
+    ;;
+  --apply)
+    apply=1
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 64
+    ;;
+esac
+
+if (( apply )) && (( EUID != 0 )) &&
+   [[ ${CUSTOM_FAST_TEMPORARY_DIRECTORIES_TESTING:-0} != 1 ]]; then
+  printf 'migrate-config: --apply requires root\n' >&2
+  exit 77
+fi
+
+legacy_tmp_count=$(awk -v uuid="${expected_uuid}" '
+  $1 == "UUID=" uuid && $2 == "/tmp" && $3 == "ext4" { count++ }
+  END { print count + 0 }
+' "${fstab_path}")
+legacy_var_tmp_count=$(awk '
+  $1 == "/tmp" && $2 == "/var/tmp" && $3 == "none" && $4 ~ /(^|,)bind(,|$)/ { count++ }
+  END { print count + 0 }
+' "${fstab_path}")
+
+if (( legacy_tmp_count > 1 || legacy_var_tmp_count > 1 )); then
+  printf 'migrate-config: duplicate legacy fstab entries require manual review\n' >&2
+  exit 1
+fi
+
+if (( legacy_tmp_count == 0 && legacy_var_tmp_count == 0 )); then
+  printf 'migrate-config: legacy fstab entries are absent\n'
+elif (( legacy_tmp_count != 1 || legacy_var_tmp_count != 1 )); then
+  printf 'migrate-config: only one legacy fstab entry matched; refusing partial migration\n' >&2
+  exit 1
+else
+  printf 'migrate-config: both legacy fstab entries match the expected layout\n'
+fi
+
+if [[ -e ${tmpfiles_override} ]]; then
+  if command -v pacman >/dev/null 2>&1 &&
+     pacman -Qo "${tmpfiles_override}" 2>/dev/null |
+       grep -Fq 'custom-fast-temporary-directories'; then
+    printf 'migrate-config: tmpfiles override is package-owned\n'
+  else
+    printf 'migrate-config: unowned tmpfiles override requires archival\n'
+  fi
+fi
+
+if (( ! apply )); then
+  exit 0
+fi
+
+timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+
+if (( legacy_tmp_count == 1 && legacy_var_tmp_count == 1 )); then
+  fstab_backup=${fstab_path}.pre-custom-fast-temporary-directories-${timestamp}
+  fstab_candidate=$(mktemp "${fstab_path}.custom-fast-temporary-directories.XXXXXX")
+  trap 'rm -f -- "${fstab_candidate:-}"' EXIT
+  cp --preserve=mode,ownership,timestamps -- "${fstab_path}" "${fstab_backup}"
+
+  awk -v uuid="${expected_uuid}" -v marker="${marker}" '
+    $1 == "UUID=" uuid && $2 == "/tmp" && $3 == "ext4" {
+      print marker
+      print "# " $0
+      next
+    }
+    $1 == "/tmp" && $2 == "/var/tmp" && $3 == "none" && $4 ~ /(^|,)bind(,|$)/ {
+      print marker
+      print "# " $0
+      next
+    }
+    { print }
+  ' "${fstab_path}" >"${fstab_candidate}"
+
+  findmnt --verify --tab-file "${fstab_candidate}" >/dev/null
+  chown --reference="${fstab_path}" "${fstab_candidate}"
+  chmod --reference="${fstab_path}" "${fstab_candidate}"
+  mv -f -- "${fstab_candidate}" "${fstab_path}"
+  trap - EXIT
+  printf 'migrate-config: archived fstab as %s\n' "${fstab_backup}"
+
+  if [[ ${CUSTOM_FAST_TEMPORARY_DIRECTORIES_TESTING:-0} == 1 &&
+        ${CUSTOM_FAST_TEMPORARY_DIRECTORIES_FAIL_AFTER_FSTAB:-0} == 1 ]]; then
+    printf 'migrate-config: injected interruption after fstab replacement\n' >&2
+    exit 75
+  fi
+fi
+
+if [[ -e ${tmpfiles_override} ]] &&
+   ! { command -v pacman >/dev/null 2>&1 &&
+       pacman -Qo "${tmpfiles_override}" 2>/dev/null |
+         grep -Fq 'custom-fast-temporary-directories'; }; then
+  tmpfiles_backup=${tmpfiles_override}.pre-custom-fast-temporary-directories-${timestamp}
+  mv -- "${tmpfiles_override}" "${tmpfiles_backup}"
+  printf 'migrate-config: archived tmpfiles override as %s\n' "${tmpfiles_backup}"
+fi
+
+reserve_first_boot_paths
+
+printf 'migrate-config: configuration is ready for package installation\n'

@@ -1,0 +1,11 @@
+[Unit]
+Description=Apply bounded private Docker builder-cache retention daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+AccuracySec=1h
+
+[Install]
+WantedBy=timers.target

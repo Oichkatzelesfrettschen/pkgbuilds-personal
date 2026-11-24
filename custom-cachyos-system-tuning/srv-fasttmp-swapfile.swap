@@ -1,0 +1,26 @@
+# The first disk swap tier: a swapfile on the Samsung 980 PRO (TLC with DRAM,
+# PCIe 4.0 x4) behind the zswap pool and ahead of /swapfile on the root disk
+# (priority 10, /etc/fstab). The root disk is a DRAM-less QLC drive on PCIe 3.0
+# whose small random I/O and post-SLC-cache writes make it the slow path under
+# swap thrashing.
+#
+# Options=discard sets both swap discard policies (mm/swapfile.c, v7.3):
+# discard_swap() trims every extent of the file once at swapon, and freed swap
+# clusters are trimmed as they are released. On a swapfile the extents map to
+# the ext4 partition's blocks, so the drive learns which written blocks hold no
+# data. zswap writeback put about 540 GB through this file in the 10 days to
+# 2026-11-24. ConditionPathIsMountPoint lets swap.target complete without this
+# tier when the fast partition does not mount (its mount is nofail). The
+# package enables it through a static swap.target.wants link, so the unit has
+# no [Install] section and reports "static".
+[Unit]
+Description=Swapfile on the Samsung 980 PRO fast partition
+Requires=custom-fast-swapfile.service
+After=custom-fast-swapfile.service
+ConditionPathIsMountPoint=/srv/fasttmp
+
+[Swap]
+What=/srv/fasttmp/swapfile
+Priority=50
+Options=discard
+

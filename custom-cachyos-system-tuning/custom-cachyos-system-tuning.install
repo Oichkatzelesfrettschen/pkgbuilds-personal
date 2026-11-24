@@ -1,0 +1,179 @@
+# shellcheck shell=sh
+
+_disable_legacy_swappiness_service() {
+    # An earlier revision shipped a swappiness-override.service that forced
+    # vm.swappiness down to 70. The value now lives in 99-swap-reclaim.conf
+    # (150, the zswap policy), so retire the old unit.
+    systemctl disable --now swappiness-override.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/multi-user.target.wants/swappiness-override.service 2>/dev/null || true
+}
+
+_reconcile_unowned_oomd_dropin() {
+    # An earlier experiment left an unowned /etc/systemd/oomd.conf.d/90-constrained.conf.
+    # This package owns the oomd swap policy in 95-custom-cachyos-system-tuning.conf
+    # (which sorts later and wins), so move the stray file aside to avoid two
+    # competing sources of truth.
+    if [ -e /etc/systemd/oomd.conf.d/90-constrained.conf ] &&
+        ! pacman -Qo /etc/systemd/oomd.conf.d/90-constrained.conf >/dev/null 2>&1; then
+        mv -f /etc/systemd/oomd.conf.d/90-constrained.conf \
+            /etc/systemd/oomd.conf.d/90-constrained.conf.bak-custom-cachyos-system-tuning \
+            2>/dev/null || true
+    fi
+}
+
+_report_compressed_tier_switch() {
+    # zswap replaces zram at the next boot: the zswap tmpfiles lines are boot-only
+    # ("w!") and the zram-generator config declares no device. A live zram device
+    # is left running until then, so zram and zswap are never active together.
+    if swapon --show=NAME --noheadings --raw | grep -Fxq /dev/zram0; then
+        printf '==> zram0 stays active until reboot; zswap takes over at the next boot.\n'
+    fi
+}
+
+_refresh_oomd_dropins() {
+    # The root ManagedOOMSwap policy depends on the socket-activated daemon.
+    # Persist the socket so the guard is present after every boot. restart,
+    # not try-restart: the private-cachyos-system-tuning 1.11.0 post_remove
+    # stops systemd-oomd.socket, and systemd-oomd.service Requires= it, so the
+    # daemon is stopped when this runs after the rename and try-restart would
+    # leave it stopped. restart starts a stopped daemon and reloads a running one.
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable --now systemd-oomd.socket >/dev/null 2>&1 || true
+    systemctl restart systemd-oomd.service >/dev/null 2>&1 || true
+}
+
+_retire_former_package_names() {
+    # private-cachyos-system-tuning (through 1.11.0) is the former name. Its
+    # post_remove ran before this scriptlet, after pacman deleted its unit
+    # files, so its "systemctl disable" of the two timers can leave dangling
+    # timers.target.wants links. Retire those two timer names only. The former
+    # oneshot private-fast-swapfile.service stays active as a not-found unit
+    # until reboot; it is left alone because the live swapfile was activated
+    # through it, and nothing here needs it stopped.
+    for _timer in private-paccache-retention.timer \
+        private-docker-build-cache-retention.timer; do
+        systemctl disable --now "$_timer" >/dev/null 2>&1 || true
+        _link=/etc/systemd/system/timers.target.wants/$_timer
+        if [ -L "$_link" ] && [ ! -e "$_link" ]; then
+            rm -f -- "$_link"
+        fi
+    done
+    # Adopt the Docker client state (buildx builder selection) under the new
+    # StateDirectory name; a rename on one filesystem is atomic.
+    if [ -d /var/lib/private-docker-build-cache-retention ] &&
+        [ ! -e /var/lib/custom-docker-build-cache-retention ]; then
+        mv -- /var/lib/private-docker-build-cache-retention \
+            /var/lib/custom-docker-build-cache-retention || true
+    fi
+}
+
+_activate_package_cache_retention() {
+    # Keep two rollback versions of each package and prevent the package cache
+    # from consuming root indefinitely. The dedicated timer avoids modifying
+    # pacman-contrib's operator-owned /etc/conf.d file.
+    systemctl enable --now custom-paccache-retention.timer >/dev/null 2>&1 || true
+}
+
+_activate_docker_build_cache_retention() {
+    # Builder cache is derived from Dockerfiles and source trees. Bound private
+    # cache data at 20 GiB while retaining at least 10 GiB; images, containers,
+    # and volumes remain outside this operation.
+    if [ -x /usr/bin/docker ]; then
+        systemctl enable --now custom-docker-build-cache-retention.timer >/dev/null 2>&1 || true
+    fi
+}
+
+_reconcile_unowned_inotify_sysctls() {
+    # 99-inotify-limits.conf carries the larger value of each limit these
+    # unowned files set; move them aside so one file is the source of truth.
+    for f in /etc/sysctl.d/50-kde-inotify-survey-max_user_instances.conf \
+        /etc/sysctl.d/50-kde-inotify-survey-max_user_watches.conf \
+        /etc/sysctl.d/60-llm-lab-watchers.conf; do
+        if [ -e "$f" ] && ! pacman -Qo "$f" >/dev/null 2>&1; then
+            mv -f "$f" "$f.bak-custom-cachyos-system-tuning" 2>/dev/null || true
+        fi
+    done
+}
+
+_apply_sensor_limits() {
+    # Write the sensors.d set lines (DDR4 jc42 limits) without waiting for a boot.
+    sensors -s >/dev/null 2>&1 || true
+}
+
+_activate_fast_swap_tier() {
+    # Start the 980 PRO swap tier; the oneshot creates the file on first use.
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl start srv-fasttmp-swapfile.swap >/dev/null 2>&1 || true
+}
+
+post_install() {
+    _retire_former_package_names
+    _disable_legacy_swappiness_service
+    _reconcile_unowned_oomd_dropin
+    _reconcile_unowned_inotify_sysctls
+    sysctl --system >/dev/null 2>&1 || true
+    _activate_fast_swap_tier
+    _refresh_oomd_dropins
+    _activate_package_cache_retention
+    _activate_docker_build_cache_retention
+    _report_compressed_tier_switch
+    _apply_sensor_limits
+
+    cat <<'EOF'
+==> custom-cachyos-system-tuning installed.
+==> Memory policy (deltas over cachyos-settings):
+==>   swap:   zswap (zstd, pool 25% of RAM) in front of 48 GiB on the 980 PRO
+==>           (/srv/fasttmp/swapfile, priority 50), then /swapfile on the root
+==>           disk (priority 10, declared in /etc/fstab); zram is disabled
+==>   VM reclaim: swappiness 150 and page-cluster 0 (99-swap-reclaim.conf),
+==>           VFS pressure 100 (99-vfs-cache-pressure.conf), 256 MiB free
+==>           reserve, watermarks and compaction (99-free-memory-reserve.conf)
+==>   systemd-oomd: 90% swap backstop with persistent socket activation
+==>   bounded-workload: user slice with memory and swap containment
+==>   bounded-build.slice: system slice, 75% memory.high, 40 GiB swap max
+==>   storage inventory: single-instance, low-priority, 3 GiB hard memory cap
+==>   /srv/scratch: root-owned sticky directory with 3-day retention
+==>   package cache: weekly retention of two versions per package
+==>   Docker private builder cache: daily 20 GiB cap with 10 GiB retained
+==> The zram-to-zswap switch takes effect at the next boot. zswap.enabled=0 on
+==>   the kernel command line is overridden at boot and can be removed from
+==>   /etc/kernel/cmdline and /etc/default/limine.
+==> IPv4 and IPv6 are both left enabled.
+==> inotify: 1152 instances, 647168 watches (99-inotify-limits.conf)
+==> sensors: NCT6798D labels; DDR4 jc42 high 75 degC, crit 85 degC
+==> nf_conntrack_max is not set here; eirikr-network owns it (262144).
+==> KSM: off from the next boot (ksmd.service runs ksmctl -d; MemoryKSM=no).
+==> journald: 1536M cap; warp-svc and vmware-usbarbitrator rate limits apply
+==>   when those services next start.
+EOF
+}
+
+post_upgrade() {
+    post_install "$1"
+}
+
+post_remove() {
+    # Config files are removed by pacman; the cachyos-settings baseline applies
+    # again after reload. Disable package-owned activation points.
+    systemctl disable --now custom-paccache-retention.timer >/dev/null 2>&1 || true
+    systemctl disable --now custom-docker-build-cache-retention.timer >/dev/null 2>&1 || true
+    # systemd-oomd.socket stays enabled. This scriptlet also runs when a renamed
+    # successor replaces the package, before the successor installs; stopping
+    # the socket there stops systemd-oomd.service (Requires=) for the length of
+    # the transaction. Without the package's -.slice drop-in the daemon
+    # monitors no cgroup, so leaving it enabled after a real removal is inert.
+    # The swapfile stays active until the next boot: swapoff here would page up to
+    # 48 GiB back into RAM inside the package transaction and can trip systemd-oomd.
+    # The removed .swap unit no longer activates it at boot.
+    sysctl --system >/dev/null 2>&1 || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
+
+    cat <<'EOF'
+==> custom-cachyos-system-tuning removed.
+==> The three /etc/sysctl.d VM files, /etc/systemd/zram-generator.conf, the
+==> zswap tmpfiles file, and the oomd / -.slice drop-ins are removed; CachyOS
+==> defaults (zram at ram; zswap per the kernel command line) apply at next boot.
+==> package-cache and Docker-cache timers are disabled; systemd-oomd stays enabled.
+==> The 980 PRO swap tier stays active until reboot; /srv/fasttmp/swapfile stays on disk.
+EOF
+}
